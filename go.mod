@@ -1,8 +1,10 @@
-module github.com/hashicorp/terraform-provider-scaffolding
+module github.com/idealo/terraform-provider-controltower
 
 go 1.15
 
 require (
+	github.com/aws/aws-sdk-go v1.31.9
+	github.com/hashicorp/aws-sdk-go-base v0.7.1
 	github.com/hashicorp/terraform-plugin-docs v0.3.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.6.1
 )
