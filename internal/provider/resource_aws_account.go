@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -184,34 +185,115 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	scconn := m.(*AWSClient).scconn
+	organizationsconn := m.(*AWSClient).organizationsconn
 
-	account, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
+	product, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
 		Id: aws.String(d.Id()),
 	})
 	if err != nil {
-		return diag.Errorf("Error reading configuration of provisioned account: %v", err)
+		return diag.Errorf("Error reading configuration of provisioned product: %v", err)
+	}
+
+	records, err := scconn.ListRecordHistory(&servicecatalog.ListRecordHistoryInput{
+		SearchFilter: &servicecatalog.ListRecordHistorySearchFilter{
+			Key:   aws.String("provisionedproduct"),
+			Value: product.ProvisionedProductDetail.Id,
+		},
+	})
+	if err != nil {
+		return diag.Errorf("Error querying the record history of provisioned product: %v", err)
+	}
+
+	var latestSuccessfulRecordId string
+	for _, v := range records.RecordDetails {
+		if *v.Status == servicecatalog.RecordStatusSucceeded {
+			latestSuccessfulRecordId = *v.RecordId
+			break
+		}
+	}
+	if latestSuccessfulRecordId == "" {
+		return diag.Errorf("No successful record found for provisioned product")
 	}
 
 	record := &servicecatalog.DescribeRecordInput{
-		Id: account.ProvisionedProductDetail.LastRecordId,
+		Id: aws.String(latestSuccessfulRecordId),
 	}
 
 	status, err := scconn.DescribeRecord(record)
 	if err != nil {
-		return diag.Errorf("Error reading configuration of provisioned account: %v", err)
+		return diag.Errorf("Error reading configuration of provisioned product: %v", err)
 	}
 
-	// Update the config.
-	d.Set("provisioned_product_name", *account.ProvisionedProductDetail.Name)
+	// update config
+	var accountId string
+	sso := map[string]interface{}{
+		"firstname": "",
+		"lastname":  "",
+		"email":     "",
+	}
+
+	ssoConfig := d.Get("sso").([]interface{})
+	if len(ssoConfig) > 0 {
+		sso = ssoConfig[0].(map[string]interface{})
+	}
+
+	d.Set("provisioned_product_name", *product.ProvisionedProductDetail.Name)
 	for _, output := range status.RecordOutputs {
 		switch *output.OutputKey {
-		case "AccountName":
-			d.Set("name", *output.OutputValue)
 		case "AccountEmail":
 			d.Set("email", *output.OutputValue)
 		case "AccountId":
+			accountId = *output.OutputValue
 			d.Set("account_id", *output.OutputValue)
+		case "SSOUserEmail":
+			sso["email"] = *output.OutputValue
 		}
+	}
+	if err := d.Set("sso", []interface{}{sso}); err != nil {
+		return diag.FromErr(err)
+	}
+
+	// query for account name
+	if accountId == "" {
+		return diag.Errorf("Could not find account ID in provisioned product")
+	}
+
+	account, err := organizationsconn.DescribeAccount(&organizations.DescribeAccountInput{
+		AccountId: aws.String(accountId),
+	})
+	if err != nil {
+		return diag.Errorf("Error reading account information for %s: %v", accountId, err)
+	}
+	if err := d.Set("name", *account.Account.Name); err != nil {
+		return diag.FromErr(err)
+	}
+
+	parents, err := organizationsconn.ListParents(&organizations.ListParentsInput{
+		ChildId: aws.String(accountId),
+	})
+	if err != nil {
+		return diag.Errorf("Error reading parents for %s: %v", accountId, err)
+	}
+
+	var parentOuId string
+	for _, v := range parents.Parents {
+		if *v.Type == "ORGANIZATIONAL_UNIT" {
+			parentOuId = *v.Id
+			break
+		}
+	}
+	if parentOuId == "" {
+		return diag.Errorf("No OU parent found for %s", accountId)
+	}
+
+	ou, err := organizationsconn.DescribeOrganizationalUnit(&organizations.DescribeOrganizationalUnitInput{
+		OrganizationalUnitId: aws.String(parentOuId),
+	})
+	if err != nil {
+		return diag.Errorf("Error describing parent OU %s: %v", parentOuId, err)
+	}
+	if err := d.Set("organizational_unit", *ou.OrganizationalUnit.Name); err != nil {
+		return diag.FromErr(err)
 	}
 
 	return nil
@@ -220,8 +302,9 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	scconn := m.(*AWSClient).scconn
 
-	// Get the name, ou and SSO details from the config.
+	// Get the name, email, ou and SSO details from the config.
 	name := d.Get("name").(string)
+	email := d.Get("email").(string)
 	ou := d.Get("organizational_unit").(string)
 	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
@@ -229,6 +312,14 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	params := &servicecatalog.UpdateProvisionedProductInput{
 		ProvisionedProductId: aws.String(d.Id()),
 		ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
+			{
+				Key:   aws.String("AccountName"),
+				Value: aws.String(name),
+			},
+			{
+				Key:   aws.String("AccountEmail"),
+				Value: aws.String(email),
+			},
 			{
 				Key:   aws.String("SSOUserFirstName"),
 				Value: aws.String(sso["firstname"].(string)),

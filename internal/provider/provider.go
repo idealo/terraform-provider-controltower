@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
 	awsbase "github.com/hashicorp/aws-sdk-go-base"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -107,8 +108,9 @@ func New(version string) func() *schema.Provider {
 }
 
 type AWSClient struct {
-	accountid string
-	scconn    *servicecatalog.ServiceCatalog
+	accountid         string
+	organizationsconn *organizations.Organizations
+	scconn            *servicecatalog.ServiceCatalog
 }
 
 func configure(version string, p *schema.Provider) func(context.Context, *schema.ResourceData) (interface{}, diag.Diagnostics) {
@@ -148,8 +150,9 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 		}
 
 		client := &AWSClient{
-			accountid: accountID,
-			scconn:    servicecatalog.New(sess.Copy()),
+			accountid:         accountID,
+			organizationsconn: organizations.New(sess.Copy()),
+			scconn:            servicecatalog.New(sess.Copy()),
 		}
 
 		return client, diags
