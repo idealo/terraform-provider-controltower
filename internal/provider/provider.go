@@ -139,7 +139,7 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 
 		sess, accountID, _, err := awsbase.GetSessionWithAccountIDAndPartition(config)
 		if err != nil {
-			return nil, diag.Errorf("Error configuring Terraform ControlTower Provider: %v", err)
+			return nil, diag.Errorf("error configuring Terraform ControlTower Provider: %v", err)
 		}
 
 		if accountID == "" {

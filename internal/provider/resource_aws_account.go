@@ -103,33 +103,9 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	scconn := m.(*AWSClient).scconn
 	organizationsconn := m.(*AWSClient).organizationsconn
 
-	products, err := scconn.SearchProducts(&servicecatalog.SearchProductsInput{
-		Filters: map[string][]*string{"FullTextSearch": {aws.String("AWS Control Tower Account Factory")}},
-	})
+	productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
 	if err != nil {
 		return diag.FromErr(err)
-	}
-	if len(products.ProductViewSummaries) != 1 {
-		return diag.Errorf("Unexpected number of search results: %d", len(products.ProductViewSummaries))
-	}
-
-	artifacts, err := scconn.ListProvisioningArtifacts(&servicecatalog.ListProvisioningArtifactsInput{
-		ProductId: products.ProductViewSummaries[0].ProductId,
-	})
-	if err != nil {
-		return diag.Errorf("Error listing provisioning artifacts: %v", err)
-	}
-
-	// Try to find the active (which should be the latest) artifact.
-	artifactID := ""
-	for _, artifact := range artifacts.ProvisioningArtifactDetails {
-		if *artifact.Active {
-			artifactID = *artifact.Id
-			break
-		}
-	}
-	if artifactID == "" {
-		return diag.Errorf("Could not find the provisioning artifact ID")
 	}
 
 	// Get the name, ou and SSO details from the config.
@@ -145,9 +121,9 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	// Create a new parameters struct.
 	params := &servicecatalog.ProvisionProductInput{
-		ProductId:              products.ProductViewSummaries[0].ProductId,
+		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
-		ProvisioningArtifactId: aws.String(artifactID),
+		ProvisioningArtifactId: artifactId,
 		ProvisioningParameters: []*servicecatalog.ProvisioningParameter{
 			{
 				Key:   aws.String("AccountName"),
@@ -210,7 +186,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
-func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	scconn := m.(*AWSClient).scconn
 	organizationsconn := m.(*AWSClient).organizationsconn
 
@@ -221,34 +197,9 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 		return diag.Errorf("Error reading configuration of provisioned product: %v", err)
 	}
 
-	records, err := scconn.ListRecordHistory(&servicecatalog.ListRecordHistoryInput{
-		SearchFilter: &servicecatalog.ListRecordHistorySearchFilter{
-			Key:   aws.String("provisionedproduct"),
-			Value: product.ProvisionedProductDetail.Id,
-		},
-	})
+	status, err := findLatestSuccessfulRecord(scconn, *product.ProvisionedProductDetail.Id)
 	if err != nil {
-		return diag.Errorf("Error querying the record history of provisioned product: %v", err)
-	}
-
-	var latestSuccessfulRecordId string
-	for _, v := range records.RecordDetails {
-		if *v.Status == servicecatalog.RecordStatusSucceeded {
-			latestSuccessfulRecordId = *v.RecordId
-			break
-		}
-	}
-	if latestSuccessfulRecordId == "" {
-		return diag.Errorf("No successful record found for provisioned product")
-	}
-
-	record := &servicecatalog.DescribeRecordInput{
-		Id: aws.String(latestSuccessfulRecordId),
-	}
-
-	status, err := scconn.DescribeRecord(record)
-	if err != nil {
-		return diag.Errorf("Error reading configuration of provisioned product: %v", err)
+		return diag.FromErr(err)
 	}
 
 	// update config
@@ -264,14 +215,21 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 		sso = ssoConfig[0].(map[string]interface{})
 	}
 
-	d.Set("provisioned_product_name", *product.ProvisionedProductDetail.Name)
+	if err := d.Set("provisioned_product_name", *product.ProvisionedProductDetail.Name); err != nil {
+		return diag.FromErr(err)
+	}
+
 	for _, output := range status.RecordOutputs {
 		switch *output.OutputKey {
 		case "AccountEmail":
-			d.Set("email", *output.OutputValue)
+			if err := d.Set("email", *output.OutputValue); err != nil {
+				return diag.FromErr(err)
+			}
 		case "AccountId":
 			accountId = *output.OutputValue
-			d.Set("account_id", *output.OutputValue)
+			if err := d.Set("account_id", *output.OutputValue); err != nil {
+				return diag.FromErr(err)
+			}
 		case "SSOUserEmail":
 			sso["email"] = *output.OutputValue
 		}
@@ -282,44 +240,24 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 
 	// query for account name
 	if accountId == "" {
-		return diag.Errorf("Could not find account ID in provisioned product")
+		return diag.Errorf("could not find account ID in provisioned product")
 	}
 
 	account, err := organizationsconn.DescribeAccount(&organizations.DescribeAccountInput{
 		AccountId: aws.String(accountId),
 	})
 	if err != nil {
-		return diag.Errorf("Error reading account information for %s: %v", accountId, err)
+		return diag.Errorf("error reading account information for %s: %v", accountId, err)
 	}
 	if err := d.Set("name", *account.Account.Name); err != nil {
 		return diag.FromErr(err)
 	}
 
-	parents, err := organizationsconn.ListParents(&organizations.ListParentsInput{
-		ChildId: aws.String(accountId),
-	})
+	ou, err := findParentOrganizationalUnit(organizationsconn, accountId)
 	if err != nil {
-		return diag.Errorf("Error reading parents for %s: %v", accountId, err)
+		return diag.FromErr(err)
 	}
-
-	var parentOuId string
-	for _, v := range parents.Parents {
-		if *v.Type == "ORGANIZATIONAL_UNIT" {
-			parentOuId = *v.Id
-			break
-		}
-	}
-	if parentOuId == "" {
-		return diag.Errorf("No OU parent found for %s", accountId)
-	}
-
-	ou, err := organizationsconn.DescribeOrganizationalUnit(&organizations.DescribeOrganizationalUnitInput{
-		OrganizationalUnitId: aws.String(parentOuId),
-	})
-	if err != nil {
-		return diag.Errorf("Error describing parent OU %s: %v", parentOuId, err)
-	}
-	if err := d.Set("organizational_unit", *ou.OrganizationalUnit.Name); err != nil {
+	if err := d.Set("organizational_unit", *ou.Name); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -327,7 +265,7 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 		ResourceId: aws.String(accountId),
 	})
 	if err != nil {
-		return diag.Errorf("Error listing tags for resource %s: %v", accountId, err)
+		return diag.Errorf("error listing tags for resource %s: %v", accountId, err)
 	}
 	if err := d.Set("tags", fromOrganizationTags(tags.Tags)); err != nil {
 		return diag.FromErr(err)
@@ -383,7 +321,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 		account, err := scconn.UpdateProvisionedProduct(params)
 		if err != nil {
-			return diag.Errorf("Error updating provisioned account %s: %v", name, err)
+			return diag.Errorf("error updating provisioned account %s: %v", name, err)
 		}
 
 		// Wait for the provisioning to finish.
@@ -398,14 +336,14 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		accountId := d.Get("account_id").(string)
 
 		if err := updateAccountTags(organizationsconn, accountId, o, n); err != nil {
-			return diag.Errorf("Error updating AWS Organizations Account (%s) tags: %s", accountId, err)
+			return diag.Errorf("error updating AWS Organizations Account (%s) tags: %s", accountId, err)
 		}
 	}
 
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
-func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	scconn := m.(*AWSClient).scconn
 
 	// Get the name from the config.
@@ -418,7 +356,7 @@ func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m int
 		ProvisionedProductId: aws.String(d.Id()),
 	})
 	if err != nil {
-		return diag.Errorf("Error deleting provisioned account %s: %v", name, err)
+		return diag.Errorf("error deleting provisioned account %s: %v", name, err)
 	}
 
 	// Wait for the provisioning to finish.
@@ -444,7 +382,7 @@ func waitForProvisioning(name string, recordID *string, m interface{}) (*service
 		var err error
 		status, err = scconn.DescribeRecord(record)
 		if err != nil {
-			return status, diag.Errorf("Error reading provisioning status of account %s: %v", name, err)
+			return status, diag.Errorf("error reading provisioning status of account %s: %v", name, err)
 		}
 
 		// If the provisioning succeeded we are done.
@@ -454,7 +392,7 @@ func waitForProvisioning(name string, recordID *string, m interface{}) (*service
 
 		// If the provisioning failed we try to cleanup the tainted account.
 		if *status.RecordDetail.Status == servicecatalog.RecordStatusFailed {
-			return status, diag.Errorf("Provisioning account %s failed: %s", name, *status.RecordDetail.RecordErrors[0].Description)
+			return status, diag.Errorf("provisioning account %s failed: %s", name, *status.RecordDetail.RecordErrors[0].Description)
 		}
 
 		// Wait 5 seconds before checking the status again.
@@ -462,6 +400,102 @@ func waitForProvisioning(name string, recordID *string, m interface{}) (*service
 	}
 
 	return status, diags
+}
+
+func findServiceCatalogAccountProductId(conn *servicecatalog.ServiceCatalog) (*string, *string, error) {
+	products, err := conn.SearchProducts(&servicecatalog.SearchProductsInput{
+		Filters: map[string][]*string{"FullTextSearch": {aws.String("AWS Control Tower Account Factory")}},
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("error occured while searching for the account product: %v", err)
+	}
+	if len(products.ProductViewSummaries) != 1 {
+		return nil, nil, fmt.Errorf("unexpected number of search results: %d", len(products.ProductViewSummaries))
+	}
+
+	productId := products.ProductViewSummaries[0].ProductId
+
+	artifacts, err := conn.ListProvisioningArtifacts(&servicecatalog.ListProvisioningArtifactsInput{
+		ProductId: productId,
+	})
+	if err != nil {
+		return productId, nil, fmt.Errorf("error listing provisioning artifacts: %v", err)
+	}
+
+	// Try to find the active (which should be the latest) artifact.
+	var artifactID *string
+	for _, artifact := range artifacts.ProvisioningArtifactDetails {
+		if *artifact.Active {
+			artifactID = artifact.Id
+			break
+		}
+	}
+	if artifactID == nil {
+		return productId, nil, fmt.Errorf("could not find the provisioning artifact ID")
+	}
+
+	return productId, artifactID, nil
+}
+
+func findLatestSuccessfulRecord(conn *servicecatalog.ServiceCatalog, provisionedProductId string) (*servicecatalog.DescribeRecordOutput, error) {
+	records, err := conn.ListRecordHistory(&servicecatalog.ListRecordHistoryInput{
+		SearchFilter: &servicecatalog.ListRecordHistorySearchFilter{
+			Key:   aws.String("provisionedproduct"),
+			Value: aws.String(provisionedProductId),
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error querying the record history of provisioned product: %v", err)
+	}
+
+	var latestSuccessfulRecordId string
+	for _, v := range records.RecordDetails {
+		if *v.Status == servicecatalog.RecordStatusSucceeded {
+			latestSuccessfulRecordId = *v.RecordId
+			break
+		}
+	}
+	if latestSuccessfulRecordId == "" {
+		return nil, fmt.Errorf("no successful record found for provisioned product")
+	}
+
+	status, err := conn.DescribeRecord(&servicecatalog.DescribeRecordInput{
+		Id: aws.String(latestSuccessfulRecordId),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error reading configuration of provisioned product: %v", err)
+	}
+
+	return status, nil
+}
+
+func findParentOrganizationalUnit(conn *organizations.Organizations, identifier string) (*organizations.OrganizationalUnit, error) {
+	parents, err := conn.ListParents(&organizations.ListParentsInput{
+		ChildId: aws.String(identifier),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error reading parents for %s: %v", identifier, err)
+	}
+
+	var parentOuId string
+	for _, v := range parents.Parents {
+		if *v.Type == organizations.ParentTypeOrganizationalUnit {
+			parentOuId = *v.Id
+			break
+		}
+	}
+	if parentOuId == "" {
+		return nil, fmt.Errorf("no OU parent found for %s", identifier)
+	}
+
+	ou, err := conn.DescribeOrganizationalUnit(&organizations.DescribeOrganizationalUnitInput{
+		OrganizationalUnitId: aws.String(parentOuId),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error describing parent OU %s: %v", parentOuId, err)
+	}
+
+	return ou.OrganizationalUnit, nil
 }
 
 func toOrganizationsTags(tags map[string]interface{}) []*organizations.Tag {
