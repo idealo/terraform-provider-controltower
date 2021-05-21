@@ -32,38 +32,44 @@ func New(version string) func() *schema.Provider {
 		p := &schema.Provider{
 			Schema: map[string]*schema.Schema{
 				"access_key": {
-					Type:     schema.TypeString,
-					Optional: true,
-					Default:  "",
+					Description: "This is the AWS access key. It must be provided, but it can also be sourced from the `AWS_ACCESS_KEY_ID` environment variable, or via a shared credentials file if `profile` is specified.",
+					Type:        schema.TypeString,
+					Optional:    true,
+					Default:     "",
 				},
 
 				"secret_key": {
-					Type:     schema.TypeString,
-					Optional: true,
-					Default:  "",
+					Description: "This is the AWS secret key. It must be provided, but it can also be sourced from the `AWS_SECRET_ACCESS_KEY` environment variable, or via a shared credentials file if `profile` is specified.",
+					Type:        schema.TypeString,
+					Optional:    true,
+					Default:     "",
 				},
 
 				"profile": {
-					Type:     schema.TypeString,
-					Optional: true,
-					Default:  "",
+					Description: "This is the AWS profile name as set in the shared credentials file.",
+					Type:        schema.TypeString,
+					Optional:    true,
+					Default:     "",
 				},
 
 				"shared_credentials_file": {
-					Type:     schema.TypeString,
-					Optional: true,
-					Default:  "",
+					Description: "This is the path to the shared credentials file. If this is not set and a profile is specified, `~/.aws/credentials` will be used.",
+					Type:        schema.TypeString,
+					Optional:    true,
+					Default:     "",
 				},
 
 				"token": {
-					Type:     schema.TypeString,
-					Optional: true,
-					Default:  "",
+					Description: "Session token for validating temporary credentials. Typically provided after successful identity federation or Multi-Factor Authentication (MFA) login. With MFA login, this is the session token provided afterward, not the 6 digit MFA code used to get temporary credentials. It can also be sourced from the `AWS_SESSION_TOKEN` environment variable.",
+					Type:        schema.TypeString,
+					Optional:    true,
+					Default:     "",
 				},
 
 				"region": {
-					Type:     schema.TypeString,
-					Required: true,
+					Description: "This is the AWS region. It must be provided, but it can also be sourced from the `AWS_DEFAULT_REGION` environment variables, or via a shared credentials file if `profile` is specified.",
+					Type:        schema.TypeString,
+					Required:    true,
 					DefaultFunc: schema.MultiEnvDefaultFunc([]string{
 						"AWS_REGION",
 						"AWS_DEFAULT_REGION",
@@ -72,27 +78,31 @@ func New(version string) func() *schema.Provider {
 				},
 
 				"max_retries": {
-					Type:     schema.TypeInt,
-					Optional: true,
-					Default:  25,
+					Description: "This is the maximum number of times an API call is retried, in the case where requests are being throttled or experiencing transient failures. The delay between the subsequent API calls increases exponentially. If omitted, the default value is `25`.",
+					Type:        schema.TypeInt,
+					Optional:    true,
+					Default:     25,
 				},
 
 				"skip_credentials_validation": {
-					Type:     schema.TypeBool,
-					Optional: true,
-					Default:  false,
+					Description: "Skip the credentials validation via the STS API. Useful for AWS API implementations that do not have STS available or implemented.",
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Default:     false,
 				},
 
 				"skip_requesting_account_id": {
-					Type:     schema.TypeBool,
-					Optional: true,
-					Default:  false,
+					Description: "Skip requesting the account ID. Useful for AWS API implementations that do not have the IAM, STS API, or metadata API.",
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Default:     false,
 				},
 
 				"skip_metadata_api_check": {
-					Type:     schema.TypeBool,
-					Optional: true,
-					Default:  false,
+					Description: "Skip the AWS Metadata API check. Useful for AWS API implementations that do not have a metadata API endpoint. Setting to `true` prevents Terraform from authenticating via the Metadata API. You may need to use other authentication methods like static credentials, configuration variables, or environment variables.",
+					Type:        schema.TypeBool,
+					Optional:    true,
+					Default:     false,
 				},
 			},
 			DataSourcesMap: map[string]*schema.Resource{},

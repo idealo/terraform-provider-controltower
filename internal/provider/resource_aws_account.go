@@ -50,20 +50,20 @@ func resourceAWSAccount() *schema.Resource {
 				MaxItems:    1,
 				Elem: &schema.Resource{
 					Schema: map[string]*schema.Schema{
-						"firstname": {
+						"first_name": {
 							Description: "First name of the user.",
 							Type:        schema.TypeString,
 							Required:    true,
 						},
 
-						"lastname": {
+						"last_name": {
 							Description: "Last name of the user.",
 							Type:        schema.TypeString,
 							Required:    true,
 						},
 
 						"email": {
-							Description: "Email address of the user.",
+							Description: "Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.",
 							Type:        schema.TypeString,
 							Required:    true,
 						},
@@ -71,7 +71,7 @@ func resourceAWSAccount() *schema.Resource {
 				},
 			},
 			"organizational_unit": {
-				Description: "Organizational Unit under which the account resides.",
+				Description: "Name of the Organizational Unit under which the account resides.",
 				Type:        schema.TypeString,
 				Required:    true,
 			},
@@ -82,14 +82,14 @@ func resourceAWSAccount() *schema.Resource {
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
 			"provisioned_product_name": {
-				Description: "Name of the service catalog product that is provisioned.",
+				Description: "Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.",
 				Type:        schema.TypeString,
 				Optional:    true,
 				Computed:    true,
 				ForceNew:    true,
 			},
 			"account_id": {
-				Description: "ID of the AWS account",
+				Description: "ID of the AWS account.",
 				Type:        schema.TypeString,
 				Computed:    true,
 			},
@@ -135,11 +135,11 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 			},
 			{
 				Key:   aws.String("SSOUserFirstName"),
-				Value: aws.String(sso["firstname"].(string)),
+				Value: aws.String(sso["first_name"].(string)),
 			},
 			{
 				Key:   aws.String("SSOUserLastName"),
-				Value: aws.String(sso["lastname"].(string)),
+				Value: aws.String(sso["last_name"].(string)),
 			},
 			{
 				Key:   aws.String("SSOUserEmail"),
@@ -205,9 +205,9 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 	// update config
 	var accountId string
 	sso := map[string]interface{}{
-		"firstname": "",
-		"lastname":  "",
-		"email":     "",
+		"first_name": "",
+		"last_name":  "",
+		"email":      "",
 	}
 
 	ssoConfig := d.Get("sso").([]interface{})
@@ -299,11 +299,11 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 				},
 				{
 					Key:   aws.String("SSOUserFirstName"),
-					Value: aws.String(sso["firstname"].(string)),
+					Value: aws.String(sso["first_name"].(string)),
 				},
 				{
 					Key:   aws.String("SSOUserLastName"),
-					Value: aws.String(sso["lastname"].(string)),
+					Value: aws.String(sso["last_name"].(string)),
 				},
 				{
 					Key:   aws.String("SSOUserEmail"),

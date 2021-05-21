@@ -1,3 +1,3 @@
-## 0.1.0 (Unreleased)
+## 1.0.0
 
-BACKWARDS INCOMPATIBILITIES / NOTES:
+- adds `controltower_aws_account` resource for creating an AWS account
