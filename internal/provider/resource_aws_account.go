@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"regexp"
 	"sync"
 	"time"
 
@@ -10,6 +11,10 @@ import (
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+)
+
+var (
+	invalidProductNameChars = regexp.MustCompile("[^a-zA-Z0-9._-]")
 )
 
 func resourceAWSAccount() *schema.Resource {
@@ -127,7 +132,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	// If no provisioned product name was configured, use the name.
 	if ppn == "" {
-		ppn = name
+		ppn = invalidProductNameChars.ReplaceAllString(name, "_")
 	}
 
 	// Create a new parameters struct.
