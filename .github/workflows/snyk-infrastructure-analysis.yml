@@ -1,4 +1,4 @@
-name: Example workflow for Golang using Snyk
+name: Snyk for Golang
 on: push
 jobs:
   security:
@@ -16,4 +16,3 @@ jobs:
         uses: github/codeql-action/upload-sarif@v1
         with:
           sarif_file: snyk.sarif
-          args: --severity-threshold=lows
