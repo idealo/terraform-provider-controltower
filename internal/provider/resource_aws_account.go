@@ -194,12 +194,18 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		Id: aws.String(d.Id()),
 	})
 	if err != nil {
-		return diag.Errorf("Error reading configuration of provisioned product: %v", err)
+		return diag.Errorf("error reading configuration of provisioned product: %v", err)
 	}
 
-	status, err := findLatestSuccessfulRecord(scconn, *product.ProvisionedProductDetail.Id)
+	lastRecordId := product.ProvisionedProductDetail.LastProvisioningRecordId
+	if product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId != nil {
+		lastRecordId = product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId
+	}
+	status, err := scconn.DescribeRecord(&servicecatalog.DescribeRecordInput{
+		Id: lastRecordId,
+	})
 	if err != nil {
-		return diag.FromErr(err)
+		return diag.Errorf("error reading last successful record of provisioned product: %v", err)
 	}
 
 	// update config
@@ -435,38 +441,6 @@ func findServiceCatalogAccountProductId(conn *servicecatalog.ServiceCatalog) (*s
 	}
 
 	return productId, artifactID, nil
-}
-
-func findLatestSuccessfulRecord(conn *servicecatalog.ServiceCatalog, provisionedProductId string) (*servicecatalog.DescribeRecordOutput, error) {
-	records, err := conn.ListRecordHistory(&servicecatalog.ListRecordHistoryInput{
-		SearchFilter: &servicecatalog.ListRecordHistorySearchFilter{
-			Key:   aws.String("provisionedproduct"),
-			Value: aws.String(provisionedProductId),
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error querying the record history of provisioned product: %v", err)
-	}
-
-	var latestSuccessfulRecordId string
-	for _, v := range records.RecordDetails {
-		if *v.Status == servicecatalog.RecordStatusSucceeded {
-			latestSuccessfulRecordId = *v.RecordId
-			break
-		}
-	}
-	if latestSuccessfulRecordId == "" {
-		return nil, fmt.Errorf("no successful record found for provisioned product")
-	}
-
-	status, err := conn.DescribeRecord(&servicecatalog.DescribeRecordInput{
-		Id: aws.String(latestSuccessfulRecordId),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("error reading configuration of provisioned product: %v", err)
-	}
-
-	return status, nil
 }
 
 func findParentOrganizationalUnit(conn *organizations.Organizations, identifier string) (*organizations.OrganizationalUnit, error) {
