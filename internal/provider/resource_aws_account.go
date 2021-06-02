@@ -157,7 +157,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	account, err := scconn.ProvisionProduct(params)
 	if err != nil {
-		return diag.Errorf("Error provisioning account %s: %v", name, err)
+		return diag.Errorf("error provisioning account %s: %v", name, err)
 	}
 
 	// Set the ID so we can cleanup the provisioned account in case of a failure.
@@ -178,7 +178,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 				Tags:       toOrganizationsTags(tags),
 			})
 			if err != nil {
-				return diag.Errorf("Error tagging account %s: %v", *output.OutputValue, err)
+				return diag.Errorf("error tagging account %s: %v", *output.OutputValue, err)
 			}
 		}
 	}
