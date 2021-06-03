@@ -2,9 +2,6 @@ name: Snyk for Golang
 on:
   push:
     branches: [ main ]
-  pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ main ]
   schedule:
     - cron: '37 12 * * 1'
 
