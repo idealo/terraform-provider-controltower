@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
+	"github.com/hashicorp/aws-sdk-go-base/tfawserr"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
@@ -193,6 +194,11 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 	product, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
 		Id: aws.String(d.Id()),
 	})
+
+	if !d.IsNewResource() && tfawserr.ErrCodeEquals(err, servicecatalog.ErrCodeResourceNotFoundException) {
+		d.SetId("")
+		return nil
+	}
 	if err != nil {
 		return diag.Errorf("error reading configuration of provisioned product: %v", err)
 	}
