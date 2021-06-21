@@ -250,9 +250,9 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		return diag.FromErr(err)
 	}
 
-	// query for account name
+	// exit read if no account id is found in the product
 	if accountId == "" {
-		return diag.Errorf("could not find account ID in provisioned product")
+		return nil
 	}
 
 	account, err := organizationsconn.DescribeAccount(&organizations.DescribeAccountInput{
