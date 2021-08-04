@@ -186,15 +186,22 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 		}
 
 		/// If we have an assume role ARN then use stscreds, otherwise continue as normal...
-		if d.Get("assume_role") != nil {
+		if _, ok := d.GetOk("assume_role"); ok {
 
-			assume_rolemap := d.Get("assume_role").([]interface{})[0].(map[string]interface{})
-			stsconfig := &aws.Config{Credentials: stscreds.NewCredentials(sess, assume_rolemap["role_arn"].(string))}
+			assumeroleblock := d.Get("assume_role").([]interface{})[0]
 
-			client = &AWSClient{
-				accountid:         accountID,
-				organizationsconn: organizations.New(sess.Copy(stsconfig)),
-				scconn:            servicecatalog.New(sess.Copy(stsconfig)),
+			if assumeroleblock != nil {
+
+				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
+
+				stsconfig := &aws.Config{Credentials: stscreds.NewCredentials(sess, arn)}
+
+				client = &AWSClient{
+					accountid:         accountID,
+					organizationsconn: organizations.New(sess.Copy(stsconfig)),
+					scconn:            servicecatalog.New(sess.Copy(stsconfig)),
+				}
+
 			}
 
 		}
