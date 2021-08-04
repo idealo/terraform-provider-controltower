@@ -3,6 +3,8 @@ package provider
 import (
 	"context"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
 	awsbase "github.com/hashicorp/aws-sdk-go-base"
@@ -65,7 +67,23 @@ func New(version string) func() *schema.Provider {
 					Optional:    true,
 					Default:     "",
 				},
-
+				"assume_role": {
+					Description: "Settings for making use of the AWS Assume Role Function",
+					Type:        schema.TypeList,
+					Required:    false,
+					Optional:    true,
+					MaxItems:    1,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							"role_arn": {
+								Description: "The ARN to be used with Assume Role. If available.",
+								Type:        schema.TypeString,
+								Optional:    true,
+								Default:     "",
+							},
+						},
+					},
+				},
 				"region": {
 					Description: "This is the AWS region. It must be provided, but it can also be sourced from the `AWS_DEFAULT_REGION` environment variables, or via a shared credentials file if `profile` is specified.",
 					Type:        schema.TypeString,
@@ -148,6 +166,7 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 		}
 
 		sess, accountID, _, err := awsbase.GetSessionWithAccountIDAndPartition(config)
+
 		if err != nil {
 			return nil, diag.Errorf("error configuring Terraform ControlTower Provider: %v", err)
 		}
@@ -159,10 +178,32 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 			})
 		}
 
+		// Normal Client
 		client := &AWSClient{
 			accountid:         accountID,
 			organizationsconn: organizations.New(sess.Copy()),
 			scconn:            servicecatalog.New(sess.Copy()),
+		}
+
+		/// If we have an assume role ARN then use stscreds, otherwise continue as normal...
+		if _, ok := d.GetOk("assume_role"); ok {
+
+			assumeroleblock := d.Get("assume_role").([]interface{})[0]
+
+			if assumeroleblock != nil {
+
+				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
+
+				stsconfig := &aws.Config{Credentials: stscreds.NewCredentials(sess, arn)}
+
+				client = &AWSClient{
+					accountid:         accountID,
+					organizationsconn: organizations.New(sess.Copy(stsconfig)),
+					scconn:            servicecatalog.New(sess.Copy(stsconfig)),
+				}
+
+			}
+
 		}
 
 		return client, diags
