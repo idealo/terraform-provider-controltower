@@ -38,6 +38,7 @@ provider "controltower" {
 ### Optional
 
 - **access_key** (String) This is the AWS access key. It must be provided, but it can also be sourced from the `AWS_ACCESS_KEY_ID` environment variable, or via a shared credentials file if `profile` is specified.
+- **assume_role** (Block List, Max: 1) Settings for making use of the AWS Assume Role Function (see [below for nested schema](#nestedblock--assume_role))
 - **max_retries** (Number) This is the maximum number of times an API call is retried, in the case where requests are being throttled or experiencing transient failures. The delay between the subsequent API calls increases exponentially. If omitted, the default value is `25`.
 - **profile** (String) This is the AWS profile name as set in the shared credentials file.
 - **secret_key** (String) This is the AWS secret key. It must be provided, but it can also be sourced from the `AWS_SECRET_ACCESS_KEY` environment variable, or via a shared credentials file if `profile` is specified.
@@ -46,3 +47,10 @@ provider "controltower" {
 - **skip_metadata_api_check** (Boolean) Skip the AWS Metadata API check. Useful for AWS API implementations that do not have a metadata API endpoint. Setting to `true` prevents Terraform from authenticating via the Metadata API. You may need to use other authentication methods like static credentials, configuration variables, or environment variables.
 - **skip_requesting_account_id** (Boolean) Skip requesting the account ID. Useful for AWS API implementations that do not have the IAM, STS API, or metadata API.
 - **token** (String) Session token for validating temporary credentials. Typically provided after successful identity federation or Multi-Factor Authentication (MFA) login. With MFA login, this is the session token provided afterward, not the 6 digit MFA code used to get temporary credentials. It can also be sourced from the `AWS_SESSION_TOKEN` environment variable.
+
+<a id="nestedblock--assume_role"></a>
+### Nested Schema for `assume_role`
+
+Optional:
+
+- **role_arn** (String) The ARN to be used with Assume Role. If available.
