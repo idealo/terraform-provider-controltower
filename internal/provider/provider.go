@@ -3,8 +3,6 @@ package provider
 import (
 	"context"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials/stscreds"
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
 	awsbase "github.com/hashicorp/aws-sdk-go-base"
@@ -79,7 +77,6 @@ func New(version string) func() *schema.Provider {
 								Description: "The ARN to be used with Assume Role. If available.",
 								Type:        schema.TypeString,
 								Optional:    true,
-								Default:     "",
 							},
 						},
 					},
@@ -165,6 +162,21 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 			},
 		}
 
+		/// If we have an assume role then use the ARN, otherwise continue as normal...
+		if _, ok := d.GetOk("assume_role"); ok {
+
+			assumeroleblock := d.Get("assume_role").([]interface{})[0]
+
+			if assumeroleblock != nil {
+
+				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
+
+				config.AssumeRoleARN = arn
+
+			}
+
+		}
+
 		sess, accountID, _, err := awsbase.GetSessionWithAccountIDAndPartition(config)
 
 		if err != nil {
@@ -178,32 +190,10 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 			})
 		}
 
-		// Normal Client
 		client := &AWSClient{
 			accountid:         accountID,
 			organizationsconn: organizations.New(sess.Copy()),
 			scconn:            servicecatalog.New(sess.Copy()),
-		}
-
-		/// If we have an assume role ARN then use stscreds, otherwise continue as normal...
-		if _, ok := d.GetOk("assume_role"); ok {
-
-			assumeroleblock := d.Get("assume_role").([]interface{})[0]
-
-			if assumeroleblock != nil {
-
-				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
-
-				stsconfig := &aws.Config{Credentials: stscreds.NewCredentials(sess, arn)}
-
-				client = &AWSClient{
-					accountid:         accountID,
-					organizationsconn: organizations.New(sess.Copy(stsconfig)),
-					scconn:            servicecatalog.New(sess.Copy(stsconfig)),
-				}
-
-			}
-
 		}
 
 		return client, diags
