@@ -38,7 +38,7 @@ provider "controltower" {
 ### Optional
 
 - **access_key** (String) This is the AWS access key. It must be provided, but it can also be sourced from the `AWS_ACCESS_KEY_ID` environment variable, or via a shared credentials file if `profile` is specified.
-- **assume_role** (Block List, Max: 1) Settings for making use of the AWS Assume Role Function (see [below for nested schema](#nestedblock--assume_role))
+- **assume_role** (Block List, Max: 1) Settings for making use of the AWS Assume Role functionality. (see [below for nested schema](#nestedblock--assume_role))
 - **max_retries** (Number) This is the maximum number of times an API call is retried, in the case where requests are being throttled or experiencing transient failures. The delay between the subsequent API calls increases exponentially. If omitted, the default value is `25`.
 - **profile** (String) This is the AWS profile name as set in the shared credentials file.
 - **secret_key** (String) This is the AWS secret key. It must be provided, but it can also be sourced from the `AWS_SECRET_ACCESS_KEY` environment variable, or via a shared credentials file if `profile` is specified.
@@ -53,4 +53,11 @@ provider "controltower" {
 
 Optional:
 
-- **role_arn** (String) The ARN to be used with Assume Role. If available.
+- **duration_seconds** (Number) Seconds to restrict the assume role session duration.
+- **external_id** (String) Unique identifier that might be required for assuming a role in another account.
+- **policy** (String) IAM Policy JSON describing further restricting permissions for the IAM Role being assumed.
+- **policy_arns** (Set of String) Amazon Resource Names (ARNs) of IAM Policies describing further restricting permissions for the IAM Role being assumed.
+- **role_arn** (String) Amazon Resource Name of an IAM Role to assume prior to making API calls.
+- **session_name** (String) Identifier for the assumed role session.
+- **tags** (Map of String) Assume role session tags.
+- **transitive_tag_keys** (Set of String) Assume role session tag keys to pass to any subsequent sessions.

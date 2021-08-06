@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"log"
 
 	"github.com/aws/aws-sdk-go/service/organizations"
 	"github.com/aws/aws-sdk-go/service/servicecatalog"
@@ -9,6 +10,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/logging"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 func init() {
@@ -65,22 +67,7 @@ func New(version string) func() *schema.Provider {
 					Optional:    true,
 					Default:     "",
 				},
-				"assume_role": {
-					Description: "Settings for making use of the AWS Assume Role Function",
-					Type:        schema.TypeList,
-					Required:    false,
-					Optional:    true,
-					MaxItems:    1,
-					Elem: &schema.Resource{
-						Schema: map[string]*schema.Schema{
-							"role_arn": {
-								Description: "The ARN to be used with Assume Role. If available.",
-								Type:        schema.TypeString,
-								Optional:    true,
-							},
-						},
-					},
-				},
+				"assume_role": assumeRoleSchema(),
 				"region": {
 					Description: "This is the AWS region. It must be provided, but it can also be sourced from the `AWS_DEFAULT_REGION` environment variables, or via a shared credentials file if `profile` is specified.",
 					Type:        schema.TypeString,
@@ -162,19 +149,68 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 			},
 		}
 
-		/// If we have an assume role then use the ARN, otherwise continue as normal...
-		if _, ok := d.GetOk("assume_role"); ok {
+		if l, ok := d.Get("assume_role").([]interface{}); ok && len(l) > 0 && l[0] != nil {
+			m := l[0].(map[string]interface{})
 
-			assumeroleblock := d.Get("assume_role").([]interface{})[0]
-
-			if assumeroleblock != nil {
-
-				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
-
-				config.AssumeRoleARN = arn
-
+			if v, ok := m["duration_seconds"].(int); ok && v != 0 {
+				config.AssumeRoleDurationSeconds = v
 			}
 
+			if v, ok := m["external_id"].(string); ok && v != "" {
+				config.AssumeRoleExternalID = v
+			}
+
+			if v, ok := m["policy"].(string); ok && v != "" {
+				config.AssumeRolePolicy = v
+			}
+
+			if policyARNSet, ok := m["policy_arns"].(*schema.Set); ok && policyARNSet.Len() > 0 {
+				for _, policyARNRaw := range policyARNSet.List() {
+					policyARN, ok := policyARNRaw.(string)
+
+					if !ok {
+						continue
+					}
+
+					config.AssumeRolePolicyARNs = append(config.AssumeRolePolicyARNs, policyARN)
+				}
+			}
+
+			if v, ok := m["role_arn"].(string); ok && v != "" {
+				config.AssumeRoleARN = v
+			}
+
+			if v, ok := m["session_name"].(string); ok && v != "" {
+				config.AssumeRoleSessionName = v
+			}
+
+			if tagMapRaw, ok := m["tags"].(map[string]interface{}); ok && len(tagMapRaw) > 0 {
+				config.AssumeRoleTags = make(map[string]string)
+
+				for k, vRaw := range tagMapRaw {
+					v, ok := vRaw.(string)
+
+					if !ok {
+						continue
+					}
+
+					config.AssumeRoleTags[k] = v
+				}
+			}
+
+			if transitiveTagKeySet, ok := m["transitive_tag_keys"].(*schema.Set); ok && transitiveTagKeySet.Len() > 0 {
+				for _, transitiveTagKeyRaw := range transitiveTagKeySet.List() {
+					transitiveTagKey, ok := transitiveTagKeyRaw.(string)
+
+					if !ok {
+						continue
+					}
+
+					config.AssumeRoleTransitiveTagKeys = append(config.AssumeRoleTransitiveTagKeys, transitiveTagKey)
+				}
+			}
+
+			log.Printf("[INFO] assume_role configuration set: (ARN: %q, SessionID: %q, ExternalID: %q)", config.AssumeRoleARN, config.AssumeRoleSessionName, config.AssumeRoleExternalID)
 		}
 
 		sess, accountID, _, err := awsbase.GetSessionWithAccountIDAndPartition(config)
@@ -197,5 +233,66 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 		}
 
 		return client, diags
+	}
+}
+
+func assumeRoleSchema() *schema.Schema {
+	return &schema.Schema{
+		Type:        schema.TypeList,
+		Optional:    true,
+		MaxItems:    1,
+		Description: "Settings for making use of the AWS Assume Role functionality.",
+		Elem: &schema.Resource{
+			Schema: map[string]*schema.Schema{
+				"duration_seconds": {
+					Type:        schema.TypeInt,
+					Optional:    true,
+					Description: "Seconds to restrict the assume role session duration.",
+				},
+				"external_id": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Description: "Unique identifier that might be required for assuming a role in another account.",
+				},
+				"policy": {
+					Type:         schema.TypeString,
+					Optional:     true,
+					Description:  "IAM Policy JSON describing further restricting permissions for the IAM Role being assumed.",
+					ValidateFunc: validation.StringIsJSON,
+				},
+				"policy_arns": {
+					Type:        schema.TypeSet,
+					Optional:    true,
+					Description: "Amazon Resource Names (ARNs) of IAM Policies describing further restricting permissions for the IAM Role being assumed.",
+					Elem: &schema.Schema{
+						Type:         schema.TypeString,
+						ValidateFunc: validateArn,
+					},
+				},
+				"role_arn": {
+					Type:         schema.TypeString,
+					Optional:     true,
+					Description:  "Amazon Resource Name of an IAM Role to assume prior to making API calls.",
+					ValidateFunc: validateArn,
+				},
+				"session_name": {
+					Type:        schema.TypeString,
+					Optional:    true,
+					Description: "Identifier for the assumed role session.",
+				},
+				"tags": {
+					Type:        schema.TypeMap,
+					Optional:    true,
+					Description: "Assume role session tags.",
+					Elem:        &schema.Schema{Type: schema.TypeString},
+				},
+				"transitive_tag_keys": {
+					Type:        schema.TypeSet,
+					Optional:    true,
+					Description: "Assume role session tag keys to pass to any subsequent sessions.",
+					Elem:        &schema.Schema{Type: schema.TypeString},
+				},
+			},
+		},
 	}
 }

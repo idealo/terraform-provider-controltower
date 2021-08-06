@@ -3,7 +3,6 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/mail"
 	"regexp"
 	"sync"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/hashicorp/aws-sdk-go-base/tfawserr"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
+	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
 
 var (
@@ -34,31 +34,18 @@ func resourceAWSAccount() *schema.Resource {
 
 		Schema: map[string]*schema.Schema{
 			"name": {
-				Description: "Name of the account.",
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := val.(string)
-					if !regexp.MustCompile(`^[ -~]+$`).MatchString(v) {
-						errs = append(errs, fmt.Errorf("%q must only contain characters between char code 32 and 126", key))
-					}
-					return
-				},
+				Description:  "Name of the account.",
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[ -~]+$`), "must only contain characters between char code 32 (SPACE) and 126 (TILDE)"),
 			},
 			"email": {
-				Description: "Root email of the account.",
-				Type:        schema.TypeString,
-				Required:    true,
-				ForceNew:    true,
-				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := val.(string)
-					_, err := mail.ParseAddress(v)
-					if err != nil {
-						errs = append(errs, fmt.Errorf("%q must be a valid email address, parsing failed with: %v", key, err))
-					}
-					return
-				},
+				Description:  "Root email of the account.",
+				Type:         schema.TypeString,
+				Required:     true,
+				ForceNew:     true,
+				ValidateFunc: validateEmailAddress,
 			},
 			"sso": {
 				Description: "Assigned SSO user settings.",
@@ -80,9 +67,10 @@ func resourceAWSAccount() *schema.Resource {
 						},
 
 						"email": {
-							Description: "Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.",
-							Type:        schema.TypeString,
-							Required:    true,
+							Description:  "Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.",
+							Type:         schema.TypeString,
+							Required:     true,
+							ValidateFunc: validateEmailAddress,
 						},
 					},
 				},
@@ -99,18 +87,12 @@ func resourceAWSAccount() *schema.Resource {
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
 			"provisioned_product_name": {
-				Description: "Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.",
-				Type:        schema.TypeString,
-				Optional:    true,
-				Computed:    true,
-				ForceNew:    true,
-				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
-					v := val.(string)
-					if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.^-]*$`).MatchString(v) {
-						errs = append(errs, fmt.Errorf("%q must only contain alphanumeric characters, dots, underscores and hyphens", key))
-					}
-					return
-				},
+				Description:  "Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.",
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.^-]*$`), "must only contain alphanumeric characters, dots, underscores and hyphens"),
 			},
 			"account_id": {
 				Description: "ID of the AWS account.",
