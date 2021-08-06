@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"regexp"
 	"sync"
 	"time"
@@ -37,12 +38,27 @@ func resourceAWSAccount() *schema.Resource {
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					v := val.(string)
+					if !regexp.MustCompile(`^[ -~]+$`).MatchString(v) {
+						errs = append(errs, fmt.Errorf("%q must only contain characters between char code 32 and 126", key))
+					}
+					return
+				},
 			},
 			"email": {
 				Description: "Root email of the account.",
 				Type:        schema.TypeString,
 				Required:    true,
 				ForceNew:    true,
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					v := val.(string)
+					_, err := mail.ParseAddress(v)
+					if err != nil {
+						errs = append(errs, fmt.Errorf("%q must be a valid email address, parsing failed with: %v", key, err))
+					}
+					return
+				},
 			},
 			"sso": {
 				Description: "Assigned SSO user settings.",
@@ -88,6 +104,13 @@ func resourceAWSAccount() *schema.Resource {
 				Optional:    true,
 				Computed:    true,
 				ForceNew:    true,
+				ValidateFunc: func(val interface{}, key string) (warns []string, errs []error) {
+					v := val.(string)
+					if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.^-]*$`).MatchString(v) {
+						errs = append(errs, fmt.Errorf("%q must only contain alphanumeric characters, dots, underscores and hyphens", key))
+					}
+					return
+				},
 			},
 			"account_id": {
 				Description: "ID of the AWS account.",
