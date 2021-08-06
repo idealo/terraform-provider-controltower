@@ -65,7 +65,22 @@ func New(version string) func() *schema.Provider {
 					Optional:    true,
 					Default:     "",
 				},
-
+				"assume_role": {
+					Description: "Settings for making use of the AWS Assume Role Function",
+					Type:        schema.TypeList,
+					Required:    false,
+					Optional:    true,
+					MaxItems:    1,
+					Elem: &schema.Resource{
+						Schema: map[string]*schema.Schema{
+							"role_arn": {
+								Description: "The ARN to be used with Assume Role. If available.",
+								Type:        schema.TypeString,
+								Optional:    true,
+							},
+						},
+					},
+				},
 				"region": {
 					Description: "This is the AWS region. It must be provided, but it can also be sourced from the `AWS_DEFAULT_REGION` environment variables, or via a shared credentials file if `profile` is specified.",
 					Type:        schema.TypeString,
@@ -147,7 +162,23 @@ func configure(version string, p *schema.Provider) func(context.Context, *schema
 			},
 		}
 
+		/// If we have an assume role then use the ARN, otherwise continue as normal...
+		if _, ok := d.GetOk("assume_role"); ok {
+
+			assumeroleblock := d.Get("assume_role").([]interface{})[0]
+
+			if assumeroleblock != nil {
+
+				arn := assumeroleblock.(map[string]interface{})["role_arn"].(string)
+
+				config.AssumeRoleARN = arn
+
+			}
+
+		}
+
 		sess, accountID, _, err := awsbase.GetSessionWithAccountIDAndPartition(config)
+
 		if err != nil {
 			return nil, diag.Errorf("error configuring Terraform ControlTower Provider: %v", err)
 		}
