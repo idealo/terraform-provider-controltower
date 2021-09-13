@@ -143,7 +143,7 @@ github.com/hashicorp/terraform-exec/tfexec
 github.com/hashicorp/terraform-exec/tfinstall
 # github.com/hashicorp/terraform-json v0.12.0
 github.com/hashicorp/terraform-json
-# github.com/hashicorp/terraform-plugin-docs v0.4.0
+# github.com/hashicorp/terraform-plugin-docs v0.5.0
 ## explicit
 github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs
 github.com/hashicorp/terraform-plugin-docs/internal/cmd
@@ -233,7 +233,7 @@ github.com/ulikunitz/xz/lzma
 # github.com/vmihailenco/msgpack v4.0.4+incompatible
 github.com/vmihailenco/msgpack
 github.com/vmihailenco/msgpack/codes
-# github.com/zclconf/go-cty v1.8.4
+# github.com/zclconf/go-cty v1.9.1
 github.com/zclconf/go-cty/cty
 github.com/zclconf/go-cty/cty/convert
 github.com/zclconf/go-cty/cty/function
