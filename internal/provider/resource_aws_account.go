@@ -86,6 +86,14 @@ func resourceAWSAccount() *schema.Resource {
 				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
+			"path_id": {
+				Description:  "Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.",
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[a-zA-Z0-9_-]*$`), "must only contain alphanumeric characters, underscores and hyphens"),
+			},
 			"provisioned_product_name": {
 				Description:  "Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.",
 				Type:         schema.TypeString,
@@ -114,9 +122,10 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 		return diag.FromErr(err)
 	}
 
-	// Get the name, ou and SSO details from the config.
+	// Get the name, ou, path and SSO details from the config.
 	name := d.Get("name").(string)
 	ou := d.Get("organizational_unit").(string)
+	pid := d.Get("path_id").(string)
 	ppn := d.Get("provisioned_product_name").(string)
 	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
@@ -127,6 +136,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	// Create a new parameters struct.
 	params := &servicecatalog.ProvisionProductInput{
+		PathId:                 aws.String(pid),
 		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
 		ProvisioningArtifactId: artifactId,
@@ -296,15 +306,17 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	organizationsconn := m.(*AWSClient).organizationsconn
 
 	if d.HasChangeExcept("tags") {
-		// Get the name, email, ou and SSO details from the config.
+		// Get the name, email, ou, path and SSO details from the config.
 		name := d.Get("name").(string)
 		email := d.Get("email").(string)
 		ou := d.Get("organizational_unit").(string)
+		pid := d.Get("path_id").(string)
 		sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 		// Create a new parameters struct.
 		params := &servicecatalog.UpdateProvisionedProductInput{
 			ProvisionedProductId: aws.String(d.Id()),
+			PathId:               aws.String(pid),
 			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
 				{
 					Key:   aws.String("AccountName"),
