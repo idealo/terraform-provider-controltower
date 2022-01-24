@@ -22,7 +22,7 @@ github.com/apparentlymart/go-textseg/textseg
 github.com/apparentlymart/go-textseg/v13/textseg
 # github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310
 github.com/armon/go-radix
-# github.com/aws/aws-sdk-go v1.42.9
+# github.com/aws/aws-sdk-go v1.42.39
 ## explicit
 github.com/aws/aws-sdk-go/aws
 github.com/aws/aws-sdk-go/aws/arn
@@ -280,7 +280,7 @@ golang.org/x/lint/golint
 # golang.org/x/mod v0.3.0
 golang.org/x/mod/module
 golang.org/x/mod/semver
-# golang.org/x/net v0.0.0-20210614182718-04defd469f4e
+# golang.org/x/net v0.0.0-20211216030914-fe4d6282115f
 golang.org/x/net/context
 golang.org/x/net/context/ctxhttp
 golang.org/x/net/http/httpguts
