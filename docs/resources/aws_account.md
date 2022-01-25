@@ -43,6 +43,7 @@ resource "controltower_aws_account" "account" {
 ### Optional
 
 - **id** (String) The ID of this resource.
+- **path_id** (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
 - **provisioned_product_name** (String) Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.
 - **tags** (Map of String) Key-value map of resource tags for the account.
 

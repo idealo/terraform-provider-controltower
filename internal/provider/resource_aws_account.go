@@ -122,10 +122,9 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 		return diag.FromErr(err)
 	}
 
-	// Get the name, ou, path and SSO details from the config.
+	// Get the name, ou and SSO details from the config.
 	name := d.Get("name").(string)
 	ou := d.Get("organizational_unit").(string)
-	pid := d.Get("path_id").(string)
 	ppn := d.Get("provisioned_product_name").(string)
 	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
@@ -136,7 +135,6 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 	// Create a new parameters struct.
 	params := &servicecatalog.ProvisionProductInput{
-		PathId:                 aws.String(pid),
 		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
 		ProvisioningArtifactId: artifactId,
@@ -166,6 +164,11 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 				Value: aws.String(ou),
 			},
 		},
+	}
+
+	// Optionally add the path id.
+	if v, ok := d.GetOk("path_id"); ok {
+		params.PathId = aws.String(v.(string))
 	}
 
 	accountMutex.Lock()
@@ -246,6 +249,10 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		return diag.FromErr(err)
 	}
 
+	if err = d.Set("path_id", *status.RecordDetail.PathId); err != nil {
+		return diag.FromErr(err)
+	}
+
 	for _, output := range status.RecordOutputs {
 		switch *output.OutputKey {
 		case "AccountEmail":
@@ -306,17 +313,15 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	organizationsconn := m.(*AWSClient).organizationsconn
 
 	if d.HasChangeExcept("tags") {
-		// Get the name, email, ou, path and SSO details from the config.
+		// Get the name, email, ou and SSO details from the config.
 		name := d.Get("name").(string)
 		email := d.Get("email").(string)
 		ou := d.Get("organizational_unit").(string)
-		pid := d.Get("path_id").(string)
 		sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 		// Create a new parameters struct.
 		params := &servicecatalog.UpdateProvisionedProductInput{
 			ProvisionedProductId: aws.String(d.Id()),
-			PathId:               aws.String(pid),
 			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
 				{
 					Key:   aws.String("AccountName"),
@@ -343,6 +348,11 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 					Value: aws.String(ou),
 				},
 			},
+		}
+
+		// Optionally add the path id.
+		if v, ok := d.GetOk("path_id"); ok {
+			params.PathId = aws.String(v.(string))
 		}
 
 		accountMutex.Lock()
