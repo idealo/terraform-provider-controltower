@@ -358,8 +358,8 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		}
 
 		// Optionally add the path id.
-		if v, ok := d.GetOk("path_id"); ok {
-			params.PathId = aws.String(v.(string))
+		if pathIdConfig := d.GetRawConfig().GetAttr("path_id"); !pathIdConfig.IsNull() {
+			params.PathId = aws.String(pathIdConfig.AsString())
 		}
 
 		accountMutex.Lock()
