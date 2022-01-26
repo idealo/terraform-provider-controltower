@@ -296,6 +296,11 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	organizationsconn := m.(*AWSClient).organizationsconn
 
 	if d.HasChangeExcept("tags") {
+		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+
 		// Get the name, email, ou and SSO details from the config.
 		name := d.Get("name").(string)
 		email := d.Get("email").(string)
@@ -304,7 +309,9 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 		// Create a new parameters struct.
 		params := &servicecatalog.UpdateProvisionedProductInput{
-			ProvisionedProductId: aws.String(d.Id()),
+			ProvisionedProductId:   aws.String(d.Id()),
+			ProductId:              productId,
+			ProvisioningArtifactId: artifactId,
 			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
 				{
 					Key:   aws.String("AccountName"),
