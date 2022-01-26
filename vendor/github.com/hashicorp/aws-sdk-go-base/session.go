@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -37,10 +38,11 @@ const (
 func GetSessionOptions(c *Config) (*session.Options, error) {
 	options := &session.Options{
 		Config: aws.Config{
-			EndpointResolver: c.EndpointResolver(),
-			HTTPClient:       cleanhttp.DefaultClient(),
-			MaxRetries:       aws.Int(0),
-			Region:           aws.String(c.Region),
+			CredentialsChainVerboseErrors: aws.Bool(true),
+			EndpointResolver:              c.EndpointResolver(),
+			HTTPClient:                    cleanhttp.DefaultClient(),
+			MaxRetries:                    aws.Int(0),
+			Region:                        aws.String(c.Region),
 		},
 		Profile:           c.Profile,
 		SharedConfigState: session.SharedConfigEnable,
@@ -55,11 +57,20 @@ func GetSessionOptions(c *Config) (*session.Options, error) {
 	// add the validated credentials to the session options
 	options.Config.Credentials = creds
 
+	transport := options.Config.HTTPClient.Transport.(*http.Transport)
 	if c.Insecure {
-		transport := options.Config.HTTPClient.Transport.(*http.Transport)
 		transport.TLSClientConfig = &tls.Config{
 			InsecureSkipVerify: true,
 		}
+	}
+
+	if c.HTTPProxy != "" {
+		proxyUrl, err := url.Parse(c.HTTPProxy)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing HTTP proxy URL: %w", err)
+		}
+
+		transport.Proxy = http.ProxyURL(proxyUrl)
 	}
 
 	if c.DebugLogging {
@@ -126,13 +137,13 @@ func GetSession(c *Config) (*session.Session, error) {
 		}
 		// RequestError: send request failed
 		// caused by: Post https://FQDN/: dial tcp: lookup FQDN: no such host
-		if tfawserr.ErrMessageAndOrigErrContain(r.Error, "RequestError", "send request failed", "no such host") {
+		if tfawserr.ErrMessageAndOrigErrContain(r.Error, request.ErrCodeRequestError, "send request failed", "no such host") {
 			log.Printf("[WARN] Disabling retries after next request due to networking issue")
 			r.Retryable = aws.Bool(false)
 		}
 		// RequestError: send request failed
 		// caused by: Post https://FQDN/: dial tcp IPADDRESS:443: connect: connection refused
-		if tfawserr.ErrMessageAndOrigErrContain(r.Error, "RequestError", "send request failed", "connection refused") {
+		if tfawserr.ErrMessageAndOrigErrContain(r.Error, request.ErrCodeRequestError, "send request failed", "connection refused") {
 			log.Printf("[WARN] Disabling retries after next request due to networking issue")
 			r.Retryable = aws.Bool(false)
 		}
