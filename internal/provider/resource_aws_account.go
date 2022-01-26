@@ -86,6 +86,14 @@ func resourceAWSAccount() *schema.Resource {
 				Optional:    true,
 				Elem:        &schema.Schema{Type: schema.TypeString},
 			},
+			"path_id": {
+				Description:  "Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.",
+				Type:         schema.TypeString,
+				Optional:     true,
+				Computed:     true,
+				ForceNew:     true,
+				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[a-zA-Z0-9_-]*$`), "must only contain alphanumeric characters, underscores and hyphens"),
+			},
 			"provisioned_product_name": {
 				Description:  "Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.",
 				Type:         schema.TypeString,
@@ -156,6 +164,11 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 				Value: aws.String(ou),
 			},
 		},
+	}
+
+	// Optionally add the path id.
+	if v, ok := d.GetOk("path_id"); ok {
+		params.PathId = aws.String(v.(string))
 	}
 
 	accountMutex.Lock()
@@ -233,6 +246,10 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 	}
 
 	if err := d.Set("provisioned_product_name", *product.ProvisionedProductDetail.Name); err != nil {
+		return diag.FromErr(err)
+	}
+
+	if err = d.Set("path_id", *status.RecordDetail.PathId); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -338,6 +355,11 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 					Value: aws.String(ou),
 				},
 			},
+		}
+
+		// Optionally add the path id.
+		if v, ok := d.GetOk("path_id"); ok {
+			params.PathId = aws.String(v.(string))
 		}
 
 		accountMutex.Lock()
