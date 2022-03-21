@@ -6,5 +6,5 @@ require (
 	github.com/aws/aws-sdk-go v1.43.20
 	github.com/hashicorp/aws-sdk-go-base v1.0.0
 	github.com/hashicorp/terraform-plugin-docs v0.6.0
-	github.com/hashicorp/terraform-plugin-sdk/v2 v2.11.0
+	github.com/hashicorp/terraform-plugin-sdk/v2 v2.12.0
 )
