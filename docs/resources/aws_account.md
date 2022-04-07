@@ -18,14 +18,12 @@ resource "controltower_aws_account" "account" {
   email               = "aws-admin@example.com"
   organizational_unit = "Sandbox"
 
+  organizational_unit_on_delete = "Suspended"
+
   sso {
     first_name = "John"
     last_name  = "Doe"
     email      = "john.doe@example.com"
-  }
-
-  lifecycle {
-    prevent_destroy = true
   }
 }
 ```
@@ -35,29 +33,30 @@ resource "controltower_aws_account" "account" {
 
 ### Required
 
-- **email** (String) Root email of the account.
-- **name** (String) Name of the account.
-- **organizational_unit** (String) Name of the Organizational Unit under which the account resides.
-- **sso** (Block List, Min: 1, Max: 1) Assigned SSO user settings. (see [below for nested schema](#nestedblock--sso))
+- `email` (String) Root email of the account.
+- `name` (String) Name of the account.
+- `organizational_unit` (String) Name of the Organizational Unit under which the account resides.
+- `sso` (Block List, Min: 1, Max: 1) Assigned SSO user settings. (see [below for nested schema](#nestedblock--sso))
 
 ### Optional
 
-- **id** (String) The ID of this resource.
-- **path_id** (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
-- **provisioned_product_name** (String) Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.
-- **tags** (Map of String) Key-value map of resource tags for the account.
+- `id` (String) The ID of this resource.
+- `organizational_unit_on_delete` (String) Name of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.
+- `path_id` (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
+- `provisioned_product_name` (String) Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.
+- `tags` (Map of String) Key-value map of resource tags for the account.
 
 ### Read-Only
 
-- **account_id** (String) ID of the AWS account.
+- `account_id` (String) ID of the AWS account.
 
 <a id="nestedblock--sso"></a>
 ### Nested Schema for `sso`
 
 Required:
 
-- **email** (String) Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.
-- **first_name** (String) First name of the user.
-- **last_name** (String) Last name of the user.
+- `email` (String) Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.
+- `first_name` (String) First name of the user.
+- `last_name` (String) Last name of the user.
 
 
