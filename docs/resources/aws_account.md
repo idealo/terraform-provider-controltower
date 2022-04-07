@@ -40,6 +40,7 @@ resource "controltower_aws_account" "account" {
 
 ### Optional
 
+- `close_account_on_delete` (Boolean) If enabled, this will close the AWS account on resource deletion, beginning the 90-day suspension period. Otherwise, the account will just be unenrolled from Control Tower.
 - `id` (String) The ID of this resource.
 - `organizational_unit_on_delete` (String) Name of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.
 - `path_id` (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
