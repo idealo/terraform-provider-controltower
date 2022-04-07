@@ -102,6 +102,11 @@ func resourceAWSAccount() *schema.Resource {
 				ForceNew:     true,
 				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.^-]*$`), "must only contain alphanumeric characters, dots, underscores and hyphens"),
 			},
+			"organizational_unit_on_delete": {
+				Description: "Name of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.",
+				Type:        schema.TypeString,
+				Optional:    true,
+			},
 			"account_id": {
 				Description: "ID of the AWS account.",
 				Type:        schema.TypeString,
@@ -312,7 +317,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	scconn := m.(*AWSClient).scconn
 	organizationsconn := m.(*AWSClient).organizationsconn
 
-	if d.HasChangeExcept("tags") {
+	if d.HasChangesExcept("tags", "organizational_unit_on_delete") {
 		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
 		if err != nil {
 			return diag.FromErr(err)
@@ -397,6 +402,60 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 
 	accountMutex.Lock()
 	defer accountMutex.Unlock()
+
+	if ou, ok := d.GetOk("organizational_unit_on_delete"); ok {
+		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
+		if err != nil {
+			return diag.FromErr(err)
+		}
+
+		params := &servicecatalog.UpdateProvisionedProductInput{
+			ProvisionedProductId:   aws.String(d.Id()),
+			ProductId:              productId,
+			ProvisioningArtifactId: artifactId,
+			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
+				{
+					Key:              aws.String("AccountName"),
+					UsePreviousValue: aws.Bool(true),
+				},
+				{
+					Key:              aws.String("AccountEmail"),
+					UsePreviousValue: aws.Bool(true),
+				},
+				{
+					Key:              aws.String("SSOUserFirstName"),
+					UsePreviousValue: aws.Bool(true),
+				},
+				{
+					Key:              aws.String("SSOUserLastName"),
+					UsePreviousValue: aws.Bool(true),
+				},
+				{
+					Key:              aws.String("SSOUserEmail"),
+					UsePreviousValue: aws.Bool(true),
+				},
+				{
+					Key:   aws.String("ManagedOrganizationalUnit"),
+					Value: aws.String(ou.(string)),
+				},
+			},
+		}
+
+		if pathIdConfig := d.GetRawConfig().GetAttr("path_id"); !pathIdConfig.IsNull() {
+			params.PathId = aws.String(pathIdConfig.AsString())
+		}
+
+		account, err := scconn.UpdateProvisionedProduct(params)
+		if err != nil {
+			return diag.Errorf("error moving account %s on delete: %v", name, err)
+		}
+
+		// Wait for the provisioning to finish.
+		_, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
+		if diags.HasError() {
+			return diags
+		}
+	}
 
 	account, err := scconn.TerminateProvisionedProduct(&servicecatalog.TerminateProvisionedProductInput{
 		ProvisionedProductId: aws.String(d.Id()),
