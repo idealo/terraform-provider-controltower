@@ -107,6 +107,12 @@ func resourceAWSAccount() *schema.Resource {
 				Type:        schema.TypeString,
 				Optional:    true,
 			},
+			"close_account_on_delete": {
+				Description: "If enabled, this will close the AWS account on resource deletion, beginning the 90-day suspension period. Otherwise, the account will just be unenrolled from Control Tower.",
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     false,
+			},
 			"account_id": {
 				Description: "ID of the AWS account.",
 				Type:        schema.TypeString,
@@ -317,7 +323,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	scconn := m.(*AWSClient).scconn
 	organizationsconn := m.(*AWSClient).organizationsconn
 
-	if d.HasChangesExcept("tags", "organizational_unit_on_delete") {
+	if d.HasChangesExcept("tags", "organizational_unit_on_delete", "close_account_on_delete") {
 		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
 		if err != nil {
 			return diag.FromErr(err)
@@ -396,6 +402,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	scconn := m.(*AWSClient).scconn
+	organizationsconn := m.(*AWSClient).organizationsconn
 
 	// Get the name from the config.
 	name := d.Get("name").(string)
@@ -403,7 +410,8 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 	accountMutex.Lock()
 	defer accountMutex.Unlock()
 
-	if ou, ok := d.GetOk("organizational_unit_on_delete"); ok {
+	accountId, accountExists := d.GetOk("acccount_id")
+	if ou, ok := d.GetOk("organizational_unit_on_delete"); ok && accountExists {
 		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
 		if err != nil {
 			return diag.FromErr(err)
@@ -466,7 +474,21 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 
 	// Wait for the provisioning to finish.
 	_, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
-	return diags
+	if diags.HasError() {
+		return diags
+	}
+
+	closeAccount := d.Get("close_account_on_delete").(bool)
+	if closeAccount && accountExists {
+		_, err := organizationsconn.CloseAccount(&organizations.CloseAccountInput{
+			AccountId: aws.String(accountId.(string)),
+		})
+		if err != nil {
+			return diag.Errorf("error closing account %s: %v", accountId, err)
+		}
+	}
+
+	return nil
 }
 
 // waitForProvisioning waits until the provisioning finished.
