@@ -102,10 +102,11 @@ func resourceAWSAccount() *schema.Resource {
 				ForceNew:     true,
 				ValidateFunc: validation.StringMatch(regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9.^-]*$`), "must only contain alphanumeric characters, dots, underscores and hyphens"),
 			},
-			"organizational_unit_on_delete": {
-				Description: "Name of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.",
-				Type:        schema.TypeString,
-				Optional:    true,
+			"organizational_unit_id_on_delete": {
+				Description:  "ID of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.",
+				Type:         schema.TypeString,
+				Optional:     true,
+				ValidateFunc: validation.StringMatch(regexp.MustCompile("^ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}$"), "see https://docs.aws.amazon.com/organizations/latest/APIReference/API_MoveAccount.html#organizations-MoveAccount-request-DestinationParentId"),
 			},
 			"close_account_on_delete": {
 				Description: "If enabled, this will close the AWS account on resource deletion, beginning the 90-day suspension period. Otherwise, the account will just be unenrolled from Control Tower.",
@@ -323,7 +324,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	scconn := m.(*AWSClient).scconn
 	organizationsconn := m.(*AWSClient).organizationsconn
 
-	if d.HasChangesExcept("tags", "organizational_unit_on_delete", "close_account_on_delete") {
+	if d.HasChangesExcept("tags", "organizational_unit_id_on_delete", "close_account_on_delete") {
 		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
 		if err != nil {
 			return diag.FromErr(err)
@@ -407,63 +408,12 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 	// Get the name from the config.
 	name := d.Get("name").(string)
 
+	product, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
+		Id: aws.String(d.Id()),
+	})
+
 	accountMutex.Lock()
 	defer accountMutex.Unlock()
-
-	accountId, accountExists := d.GetOk("acccount_id")
-	if ou, ok := d.GetOk("organizational_unit_on_delete"); ok && accountExists {
-		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
-		if err != nil {
-			return diag.FromErr(err)
-		}
-
-		params := &servicecatalog.UpdateProvisionedProductInput{
-			ProvisionedProductId:   aws.String(d.Id()),
-			ProductId:              productId,
-			ProvisioningArtifactId: artifactId,
-			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
-				{
-					Key:              aws.String("AccountName"),
-					UsePreviousValue: aws.Bool(true),
-				},
-				{
-					Key:              aws.String("AccountEmail"),
-					UsePreviousValue: aws.Bool(true),
-				},
-				{
-					Key:              aws.String("SSOUserFirstName"),
-					UsePreviousValue: aws.Bool(true),
-				},
-				{
-					Key:              aws.String("SSOUserLastName"),
-					UsePreviousValue: aws.Bool(true),
-				},
-				{
-					Key:              aws.String("SSOUserEmail"),
-					UsePreviousValue: aws.Bool(true),
-				},
-				{
-					Key:   aws.String("ManagedOrganizationalUnit"),
-					Value: aws.String(ou.(string)),
-				},
-			},
-		}
-
-		if pathIdConfig := d.GetRawConfig().GetAttr("path_id"); !pathIdConfig.IsNull() {
-			params.PathId = aws.String(pathIdConfig.AsString())
-		}
-
-		account, err := scconn.UpdateProvisionedProduct(params)
-		if err != nil {
-			return diag.Errorf("error moving account %s on delete: %v", name, err)
-		}
-
-		// Wait for the provisioning to finish.
-		_, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
-		if diags.HasError() {
-			return diags
-		}
-	}
 
 	account, err := scconn.TerminateProvisionedProduct(&servicecatalog.TerminateProvisionedProductInput{
 		ProvisionedProductId: aws.String(d.Id()),
@@ -478,8 +428,26 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 		return diags
 	}
 
+	accountId, accountExists := d.GetOk("account_id")
+	accountProvisioned := product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId != nil
+	if newOuId, ok := d.GetOk("organizational_unit_id_on_delete"); ok && accountExists && accountProvisioned {
+		rootId, err := findParentOrganizationRootId(organizationsconn, accountId.(string))
+		if err != nil {
+			return diag.FromErr(err)
+		}
+
+		_, err = organizationsconn.MoveAccount(&organizations.MoveAccountInput{
+			AccountId:           aws.String(accountId.(string)),
+			SourceParentId:      aws.String(rootId),
+			DestinationParentId: aws.String(newOuId.(string)),
+		})
+		if err != nil {
+			return diag.FromErr(err)
+		}
+	}
+
 	closeAccount := d.Get("close_account_on_delete").(bool)
-	if closeAccount && accountExists {
+	if closeAccount && accountExists && accountProvisioned {
 		_, err := organizationsconn.CloseAccount(&organizations.CloseAccountInput{
 			AccountId: aws.String(accountId.(string)),
 		})
@@ -591,6 +559,23 @@ func findParentOrganizationalUnit(conn *organizations.Organizations, identifier 
 	}
 
 	return ou.OrganizationalUnit, nil
+}
+
+func findParentOrganizationRootId(conn *organizations.Organizations, identifier string) (string, error) {
+	parents, err := conn.ListParents(&organizations.ListParentsInput{
+		ChildId: aws.String(identifier),
+	})
+	if err != nil {
+		return "", fmt.Errorf("error reading parents for %s: %v", identifier, err)
+	}
+
+	for _, v := range parents.Parents {
+		if *v.Type == organizations.ParentTypeRoot {
+			return *v.Id, nil
+		}
+	}
+
+	return "", fmt.Errorf("no organization root parent found for %s", identifier)
 }
 
 func toOrganizationsTags(tags map[string]interface{}) []*organizations.Tag {
