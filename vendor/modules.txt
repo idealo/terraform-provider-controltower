@@ -10,7 +10,7 @@ github.com/agext/levenshtein
 github.com/apparentlymart/go-textseg/v13/textseg
 # github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310
 github.com/armon/go-radix
-# github.com/aws/aws-sdk-go v1.43.31
+# github.com/aws/aws-sdk-go v1.44.14
 ## explicit
 github.com/aws/aws-sdk-go/aws
 github.com/aws/aws-sdk-go/aws/arn
