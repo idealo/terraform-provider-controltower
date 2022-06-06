@@ -4843,7 +4843,9 @@ func (c *ServiceCatalog) ListAcceptedPortfolioSharesRequest(input *ListAcceptedP
 
 // ListAcceptedPortfolioShares API operation for AWS Service Catalog.
 //
-// Lists all portfolios for which sharing was accepted by this account.
+// Lists all imported portfolios for which account-to-account shares were accepted
+// by this account. By specifying the PortfolioShareType, you can list portfolios
+// for which organizational shares were accepted by this account.
 //
 // Returns awserr.Error for service API and SDK errors. Use runtime type assertions
 // with awserr.Error's Code and Message methods to get detailed information about
@@ -13624,8 +13626,14 @@ type DescribeProvisioningParametersOutput struct {
 	// Information about the constraints used to provision the product.
 	ConstraintSummaries []*ConstraintSummary `type:"list"`
 
+	// A list of the keys and descriptions of the outputs. These outputs can be
+	// referenced from a provisioned product launched from this provisioning artifact.
+	ProvisioningArtifactOutputKeys []*ProvisioningArtifactOutput `type:"list"`
+
 	// The output of the provisioning artifact.
-	ProvisioningArtifactOutputs []*ProvisioningArtifactOutput `type:"list"`
+	//
+	// Deprecated: This property is deprecated and returns the Id and Description of the Provisioning Artifact. Use ProvisioningArtifactOutputKeys instead to get the Keys and Descriptions of the outputs.
+	ProvisioningArtifactOutputs []*ProvisioningArtifactOutput `deprecated:"true" type:"list"`
 
 	// Information about the parameters used to provision the product.
 	ProvisioningArtifactParameters []*ProvisioningArtifactParameter `type:"list"`
@@ -13663,6 +13671,12 @@ func (s DescribeProvisioningParametersOutput) GoString() string {
 // SetConstraintSummaries sets the ConstraintSummaries field's value.
 func (s *DescribeProvisioningParametersOutput) SetConstraintSummaries(v []*ConstraintSummary) *DescribeProvisioningParametersOutput {
 	s.ConstraintSummaries = v
+	return s
+}
+
+// SetProvisioningArtifactOutputKeys sets the ProvisioningArtifactOutputKeys field's value.
+func (s *DescribeProvisioningParametersOutput) SetProvisioningArtifactOutputKeys(v []*ProvisioningArtifactOutput) *DescribeProvisioningParametersOutput {
+	s.ProvisioningArtifactOutputKeys = v
 	return s
 }
 
@@ -15677,7 +15691,7 @@ type LaunchPathSummary struct {
 	// The identifier of the product path.
 	Id *string `min:"1" type:"string"`
 
-	// The name of the portfolio to which the user was assigned.
+	// The name of the portfolio that contains the product.
 	Name *string `type:"string"`
 
 	// The tags associated with this product path.
@@ -15813,12 +15827,13 @@ type ListAcceptedPortfolioSharesInput struct {
 
 	// The type of shared portfolios to list. The default is to list imported portfolios.
 	//
-	//    * AWS_ORGANIZATIONS - List portfolios shared by the management account
-	//    of your organization
+	//    * AWS_ORGANIZATIONS - List portfolios accepted and shared via organizational
+	//    sharing by the management account or delegated administrator of your organization.
 	//
-	//    * AWS_SERVICECATALOG - List default portfolios
+	//    * AWS_SERVICECATALOG - Deprecated type.
 	//
-	//    * IMPORTED - List imported portfolios
+	//    * IMPORTED - List imported portfolios that have been accepted and shared
+	//    through account-to-account sharing.
 	PortfolioShareType *string `type:"string" enum:"PortfolioShareType"`
 }
 
