@@ -3,7 +3,7 @@ resource "controltower_aws_account" "account" {
   email               = "aws-admin@example.com"
   organizational_unit = "Sandbox"
 
-  organizational_unit_on_delete = "Suspended"
+  organizational_unit_id_on_delete = "Suspended"
 
   sso {
     first_name = "John"
