@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	tfjson "github.com/hashicorp/terraform-json"
+
 	"github.com/hashicorp/terraform-plugin-docs/internal/mdplain"
 	"github.com/hashicorp/terraform-plugin-docs/internal/tmplfuncs"
 	"github.com/hashicorp/terraform-plugin-docs/schemamd"
@@ -40,6 +41,7 @@ func newTemplate(name, text string) (*template.Template, error) {
 			return tmplfuncs.CodeFile("terraform", file)
 		},
 		"trimspace": strings.TrimSpace,
+		"split":     strings.Split,
 	}))
 
 	var err error
@@ -116,7 +118,7 @@ func (t providerFileTemplate) Render(name string) (string, error) {
 	}{name, providerShortName(name)})
 }
 
-func (t providerTemplate) Render(providerName, exampleFile string, schema *tfjson.Schema) (string, error) {
+func (t providerTemplate) Render(providerName, renderedProviderName, exampleFile string, schema *tfjson.Schema) (string, error) {
 	schemaBuffer := bytes.NewBuffer(nil)
 	err := schemamd.Render(schema, schemaBuffer)
 	if err != nil {
@@ -142,6 +144,8 @@ func (t providerTemplate) Render(providerName, exampleFile string, schema *tfjso
 		ProviderShortName string
 
 		SchemaMarkdown string
+
+		RenderedProviderName string
 	}{
 		Description: schema.Block.Description,
 
@@ -152,10 +156,12 @@ func (t providerTemplate) Render(providerName, exampleFile string, schema *tfjso
 		ProviderShortName: providerShortName(providerName),
 
 		SchemaMarkdown: schemaComment + "\n" + schemaBuffer.String(),
+
+		RenderedProviderName: renderedProviderName,
 	})
 }
 
-func (t resourceTemplate) Render(name, providerName, typeName, exampleFile, importFile string, schema *tfjson.Schema) (string, error) {
+func (t resourceTemplate) Render(name, providerName, renderedProviderName, typeName, exampleFile, importFile string, schema *tfjson.Schema) (string, error) {
 	schemaBuffer := bytes.NewBuffer(nil)
 	err := schemamd.Render(schema, schemaBuffer)
 	if err != nil {
@@ -182,6 +188,8 @@ func (t resourceTemplate) Render(name, providerName, typeName, exampleFile, impo
 		ProviderShortName string
 
 		SchemaMarkdown string
+
+		RenderedProviderName string
 	}{
 		Type:        typeName,
 		Name:        name,
@@ -197,6 +205,8 @@ func (t resourceTemplate) Render(name, providerName, typeName, exampleFile, impo
 		ProviderShortName: providerShortName(providerName),
 
 		SchemaMarkdown: schemaComment + "\n" + schemaBuffer.String(),
+
+		RenderedProviderName: renderedProviderName,
 	})
 }
 
