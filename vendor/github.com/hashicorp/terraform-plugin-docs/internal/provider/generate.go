@@ -64,8 +64,9 @@ var (
 )
 
 type generator struct {
-	legacySidebar bool
-	tfVersion     string
+	ignoreDeprecated bool
+	legacySidebar    bool
+	tfVersion        string
 
 	providerName         string
 	renderedProviderName string
@@ -85,10 +86,11 @@ func (g *generator) warnf(format string, a ...interface{}) {
 	g.ui.Warn(fmt.Sprintf(format, a...))
 }
 
-func Generate(ui cli.Ui, legacySidebar bool, providerName, renderedProviderName, renderedWebsiteDir, examplesDir, websiteTmpDir, websiteSourceDir, tfVersion string) error {
+func Generate(ui cli.Ui, legacySidebar bool, providerName, renderedProviderName, renderedWebsiteDir, examplesDir, websiteTmpDir, websiteSourceDir, tfVersion string, ignoreDeprecated bool) error {
 	g := &generator{
-		legacySidebar: legacySidebar,
-		tfVersion:     tfVersion,
+		ignoreDeprecated: ignoreDeprecated,
+		legacySidebar:    legacySidebar,
+		tfVersion:        tfVersion,
 
 		providerName:         providerName,
 		renderedProviderName: renderedProviderName,
@@ -319,6 +321,10 @@ func (g *generator) renderMissingProviderDoc(providerName string, schema *tfjson
 func (g *generator) renderMissingDocs(providerName string, providerSchema *tfjson.ProviderSchema) error {
 	g.infof("generating missing resource content")
 	for name, schema := range providerSchema.ResourceSchemas {
+		if g.ignoreDeprecated && schema.Block.Deprecated {
+			continue
+		}
+
 		err := g.renderMissingResourceDoc(providerName, name, "Resource", schema,
 			websiteResourceFileTemplate,
 			websiteResourceFallbackFileTemplate,
@@ -332,6 +338,10 @@ func (g *generator) renderMissingDocs(providerName string, providerSchema *tfjso
 
 	g.infof("generating missing data source content")
 	for name, schema := range providerSchema.DataSourceSchemas {
+		if g.ignoreDeprecated && schema.Block.Deprecated {
+			continue
+		}
+
 		err := g.renderMissingResourceDoc(providerName, name, "Data Source", schema,
 			websiteDataSourceFileTemplate,
 			websiteDataSourceFallbackFileTemplate,
@@ -415,42 +425,43 @@ func (g *generator) renderStaticWebsite(providerName string, providerSchema *tfj
 		switch relDir {
 		case "data-sources/":
 			resSchema, resName := resourceSchema(providerSchema.DataSourceSchemas, shortName, relFile)
-			if resSchema == nil {
-				return fmt.Errorf("unable to find resource for provider (%s) and template (%s)", shortName, relFile)
+			exampleFilePath := filepath.Join(g.examplesDir, "data-sources", resName, "data-source.tf")
+			if resSchema != nil {
+				tmpl := resourceTemplate(tmplData)
+				render, err := tmpl.Render(resName, providerName, g.renderedProviderName, "Data Source", exampleFilePath, "", resSchema)
+				if err != nil {
+					return fmt.Errorf("unable to render data source template %q: %w", rel, err)
+				}
+				_, err = out.WriteString(render)
+				if err != nil {
+					return fmt.Errorf("unable to write rendered string: %w", err)
+				}
+				return nil
 			}
-
-			tmpl := resourceTemplate(tmplData)
-			render, err := tmpl.Render(resName, providerName, g.renderedProviderName, "Data Source", "", "", resSchema)
-			if err != nil {
-				return fmt.Errorf("unable to render data source template %q: %w", rel, err)
-			}
-			_, err = out.WriteString(render)
-			if err != nil {
-				return fmt.Errorf("unable to write rendered string: %w", err)
-			}
-			return nil
+			g.warnf("data source entitled %q, or %q does not exist", shortName, resName)
 		case "resources/":
-			// spew.Dump(providerSchema.ResourceSchemas, shortName)
 			resSchema, resName := resourceSchema(providerSchema.ResourceSchemas, shortName, relFile)
-			// spew.Dump(resName, resSchema)
-			if resSchema == nil {
-				return fmt.Errorf("unable to find resource for provider (%s) and template (%s)", shortName, relFile)
-			}
+			exampleFilePath := filepath.Join(g.examplesDir, "resources", resName, "resource.tf")
+			importFilePath := filepath.Join(g.examplesDir, "resources", resName, "import.sh")
 
-			tmpl := resourceTemplate(tmplData)
-			render, err := tmpl.Render(resName, providerName, g.renderedProviderName, "Resource", "", "", resSchema)
-			if err != nil {
-				return fmt.Errorf("unable to render resource template %q: %w", rel, err)
+			if resSchema != nil {
+				tmpl := resourceTemplate(tmplData)
+				render, err := tmpl.Render(resName, providerName, g.renderedProviderName, "Resource", exampleFilePath, importFilePath, resSchema)
+				if err != nil {
+					return fmt.Errorf("unable to render resource template %q: %w", rel, err)
+				}
+				_, err = out.WriteString(render)
+				if err != nil {
+					return fmt.Errorf("unable to write regindered string: %w", err)
+				}
+				return nil
 			}
-			_, err = out.WriteString(render)
-			if err != nil {
-				return fmt.Errorf("unable to write regindered string: %w", err)
-			}
-			return nil
+			g.warnf("resource entitled %q, or %q does not exist", shortName, resName)
 		case "": // provider
 			if relFile == "index.md.tmpl" {
 				tmpl := providerTemplate(tmplData)
-				render, err := tmpl.Render(providerName, g.renderedProviderName, "", providerSchema.ConfigSchema)
+				exampleFilePath := filepath.Join(g.examplesDir, "provider", "provider.tf")
+				render, err := tmpl.Render(providerName, g.renderedProviderName, exampleFilePath, providerSchema.ConfigSchema)
 				if err != nil {
 					return fmt.Errorf("unable to render provider template %q: %w", rel, err)
 				}
