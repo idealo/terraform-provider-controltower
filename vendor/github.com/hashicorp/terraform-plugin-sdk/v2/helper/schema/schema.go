@@ -311,11 +311,32 @@ type Schema struct {
 	// "parent_block_name.0.child_attribute_name".
 	RequiredWith []string
 
-	// Deprecated indicates the message to include in a warning diagnostic to
-	// practitioners when this attribute is configured. Typically this is used
-	// to signal that this attribute will be removed in the future and provide
-	// next steps to the practitioner, such as using a different attribute,
-	// different resource, or if it should just be removed.
+	// Deprecated defines warning diagnostic details to display to
+	// practitioners configuring this attribute or block. The warning
+	// diagnostic summary is automatically set to "Argument is deprecated"
+	// along with configuration source file and line information.
+	//
+	// This warning diagnostic is only displayed during Terraform's validation
+	// phase when this field is a non-empty string, when the attribute is
+	// Required or Optional, and if the practitioner configuration attempts to
+	// set the attribute value to a known value. It cannot detect practitioner
+	// configuration values that are unknown ("known after apply").
+	//
+	// This field has no effect when the attribute is Computed-only (read-only;
+	// not Required or Optional) and a practitioner attempts to reference
+	// this attribute value in their configuration. There is a Terraform
+	// feature request to support this type of functionality:
+	//
+	//     https://github.com/hashicorp/terraform/issues/7569
+	//
+	// Set this field to a practitioner actionable message such as:
+	//
+	//     - "Configure other_attribute instead. This attribute will be removed
+	//       in the next major version of the provider."
+	//     - "Remove this attribute's configuration as it no longer is used and
+	//       the attribute will be removed in the next major version of the
+	//       provider."
+	//
 	Deprecated string
 
 	// ValidateFunc allows individual fields to define arbitrary validation
@@ -654,7 +675,7 @@ func (m schemaMap) Diff(
 	}
 
 	for k, schema := range m {
-		err := m.diff(k, schema, result, d, false)
+		err := m.diff(ctx, k, schema, result, d, false)
 		if err != nil {
 			return nil, err
 		}
@@ -681,7 +702,7 @@ func (m schemaMap) Diff(
 			return nil, err
 		}
 		for _, k := range rd.UpdatedKeys() {
-			err := m.diff(k, mc[k], result, rd, false)
+			err := m.diff(ctx, k, mc[k], result, rd, false)
 			if err != nil {
 				return nil, err
 			}
@@ -708,7 +729,7 @@ func (m schemaMap) Diff(
 
 			// Perform the diff again
 			for k, schema := range m {
-				err := m.diff(k, schema, result2, d, false)
+				err := m.diff(ctx, k, schema, result2, d, false)
 				if err != nil {
 					return nil, err
 				}
@@ -722,7 +743,7 @@ func (m schemaMap) Diff(
 					return nil, err
 				}
 				for _, k := range rd.UpdatedKeys() {
-					err := m.diff(k, mc[k], result2, rd, false)
+					err := m.diff(ctx, k, mc[k], result2, rd, false)
 					if err != nil {
 						return nil, err
 					}
@@ -1087,6 +1108,7 @@ type resourceDiffer interface {
 }
 
 func (m schemaMap) diff(
+	ctx context.Context,
 	k string,
 	schema *Schema,
 	diff *terraform.InstanceDiff,
@@ -1101,11 +1123,11 @@ func (m schemaMap) diff(
 	case TypeBool, TypeInt, TypeFloat, TypeString:
 		err = m.diffString(k, schema, unsupressedDiff, d, all)
 	case TypeList:
-		err = m.diffList(k, schema, unsupressedDiff, d, all)
+		err = m.diffList(ctx, k, schema, unsupressedDiff, d, all)
 	case TypeMap:
 		err = m.diffMap(k, schema, unsupressedDiff, d, all)
 	case TypeSet:
-		err = m.diffSet(k, schema, unsupressedDiff, d, all)
+		err = m.diffSet(ctx, k, schema, unsupressedDiff, d, all)
 	default:
 		err = fmt.Errorf("%s: unknown type %#v", k, schema.Type)
 	}
@@ -1122,7 +1144,7 @@ func (m schemaMap) diff(
 					continue
 				}
 
-				log.Printf("[DEBUG] ignoring change of %q due to DiffSuppressFunc", attrK)
+				logging.HelperSchemaDebug(ctx, "Ignoring change due to DiffSuppressFunc", map[string]interface{}{logging.KeyAttributePath: attrK})
 				attrV = &terraform.ResourceAttrDiff{
 					Old: attrV.Old,
 					New: attrV.Old,
@@ -1136,6 +1158,7 @@ func (m schemaMap) diff(
 }
 
 func (m schemaMap) diffList(
+	ctx context.Context,
 	k string,
 	schema *Schema,
 	diff *terraform.InstanceDiff,
@@ -1234,7 +1257,7 @@ func (m schemaMap) diffList(
 		for i := 0; i < maxLen; i++ {
 			for k2, schema := range t.Schema {
 				subK := fmt.Sprintf("%s.%d.%s", k, i, k2)
-				err := m.diff(subK, schema, diff, d, all)
+				err := m.diff(ctx, subK, schema, diff, d, all)
 				if err != nil {
 					return err
 				}
@@ -1250,7 +1273,7 @@ func (m schemaMap) diffList(
 		// just diff each.
 		for i := 0; i < maxLen; i++ {
 			subK := fmt.Sprintf("%s.%d", k, i)
-			err := m.diff(subK, &t2, diff, d, all)
+			err := m.diff(ctx, subK, &t2, diff, d, all)
 			if err != nil {
 				return err
 			}
@@ -1375,6 +1398,7 @@ func (m schemaMap) diffMap(
 }
 
 func (m schemaMap) diffSet(
+	ctx context.Context,
 	k string,
 	schema *Schema,
 	diff *terraform.InstanceDiff,
@@ -1480,7 +1504,7 @@ func (m schemaMap) diffSet(
 				// This is a complex resource
 				for k2, schema := range t.Schema {
 					subK := fmt.Sprintf("%s.%s.%s", k, code, k2)
-					err := m.diff(subK, schema, diff, d, true)
+					err := m.diff(ctx, subK, schema, diff, d, true)
 					if err != nil {
 						return err
 					}
@@ -1494,7 +1518,7 @@ func (m schemaMap) diffSet(
 				// This is just a primitive element, so go through each and
 				// just diff each.
 				subK := fmt.Sprintf("%s.%s", k, code)
-				err := m.diff(subK, &t2, diff, d, true)
+				err := m.diff(ctx, subK, &t2, diff, d, true)
 				if err != nil {
 					return err
 				}
