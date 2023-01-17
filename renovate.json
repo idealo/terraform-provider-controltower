@@ -6,6 +6,6 @@
     ":dependencyDashboard",
     ":label(dependencies)",
     ":renovatePrefix",
-    ":rebaseStalePrs",
+    ":rebaseStalePrs"
   ]
 }
