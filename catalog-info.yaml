@@ -17,3 +17,4 @@ spec:
   type: service
   lifecycle: production
   owner: group:cloud-shuttle
+  system: organization
