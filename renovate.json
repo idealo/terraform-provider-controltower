@@ -7,5 +7,8 @@
     ":label(dependencies)",
     ":renovatePrefix",
     ":rebaseStalePrs"
-  ]
+  ],
+  "schedule": [
+    "on the last day of the month"
+    ]
 }
