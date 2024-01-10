@@ -22,8 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-    - name: Check folder
-      run: ls
+    - name: Check Folder
+      uses: philips-labs/list-folders-action@v1
+      with:
+        path: .
 
     - name: Set up Go
       uses: actions/setup-go@v5
