@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 5
     steps:
     - name: Check folder
-      run: echo dir content = $(ls)
+      run: echo dir content = $(ls ..)
 
     - name: Set up Go
       uses: actions/setup-go@v5
