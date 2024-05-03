@@ -3,6 +3,7 @@
   "extends": [
     "config:base",
     "group:allNonMajor",
+    ":automergeMinor",
     ":dependencyDashboard",
     ":label(dependencies)",
     ":renovatePrefix",
