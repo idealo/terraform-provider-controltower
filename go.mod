@@ -3,9 +3,9 @@ module github.com/idealo/terraform-provider-controltower
 go 1.21
 
 require (
-	github.com/aws/aws-sdk-go v1.53.14
+	github.com/aws/aws-sdk-go v1.54.11
 	github.com/hashicorp/aws-sdk-go-base v1.1.0
-	github.com/hashicorp/terraform-plugin-docs v0.19.3
+	github.com/hashicorp/terraform-plugin-docs v0.19.4
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.34.0
 )
 
