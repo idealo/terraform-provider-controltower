@@ -6,8 +6,7 @@ import (
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/config"
 	orgTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
-	"github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
-
+	scTypes "github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
 	"log"
 	"regexp"
 	"sync"
@@ -133,7 +132,7 @@ var accountMutex sync.Mutex
 func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 
 	// credentials, and shared configuration files
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
@@ -164,7 +163,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
 		ProvisioningArtifactId: artifactId,
-		ProvisioningParameters: []types.ProvisioningParameter{
+		ProvisioningParameters: []scTypes.ProvisioningParameter{
 			{
 				Key:   aws.String("AccountName"),
 				Value: aws.String(name),
@@ -233,7 +232,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 
 func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	// credentials, and shared configuration files
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
@@ -246,7 +245,7 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 	})
 
 	if !d.IsNewResource() {
-		var notFoundErr *types.ResourceNotFoundException
+		var notFoundErr *scTypes.ResourceNotFoundException
 		if errors.As(err, &notFoundErr) {
 			d.SetId("")
 			return nil
@@ -344,7 +343,7 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 }
 
 func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		log.Fatalf("unable to load SDK config, %v", err)
 	}
@@ -368,7 +367,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 			ProvisionedProductId:   aws.String(d.Id()),
 			ProductId:              productId,
 			ProvisioningArtifactId: artifactId,
-			ProvisioningParameters: []types.UpdateProvisioningParameter{
+			ProvisioningParameters: []scTypes.UpdateProvisioningParameter{
 				{
 					Key:   aws.String("AccountName"),
 					Value: aws.String(name),
@@ -429,7 +428,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 }
 
 func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
+	cfg, err := config.LoadDefaultConfig(ctx)
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
 
@@ -510,12 +509,12 @@ func waitForProvisioning(ctx context.Context, name string, recordID *string, cli
 		}
 
 		// If the provisioning succeeded we are done.
-		if status.RecordDetail.Status == types.RecordStatusSucceeded {
+		if status.RecordDetail.Status == scTypes.RecordStatusSucceeded {
 			break
 		}
 
 		// If the provisioning failed we try to cleanup the tainted account.
-		if status.RecordDetail.Status == types.RecordStatusFailed {
+		if status.RecordDetail.Status == scTypes.RecordStatusFailed {
 			if len(status.RecordDetail.RecordErrors) > 0 {
 				return status, diag.Errorf("provisioning account %s failed: %s", name, *status.RecordDetail.RecordErrors[0].Description)
 			}
