@@ -12,16 +12,6 @@ func init() {
 	// Set descriptions to support markdown syntax, this will be used in document generation
 	// and the language server.
 	schema.DescriptionKind = schema.StringMarkdown
-
-	// Customize the content of descriptions when output. For example you can add defaults on
-	// to the exported descriptions if present.
-	// schema.SchemaDescriptionBuilder = func(s *schema.Schema) string {
-	// 	desc := s.Description
-	// 	if s.Default != nil {
-	// 		desc += fmt.Sprintf(" Defaults to `%v`.", s.Default)
-	// 	}
-	// 	return strings.TrimSpace(desc)
-	// }
 }
 
 func New() func() *schema.Provider {
@@ -95,37 +85,41 @@ func New() func() *schema.Provider {
 func configureProvider(ctx context.Context, d *schema.ResourceData) (interface{}, diag.Diagnostics) {
 	region := d.Get("region").(string)
 	maxRetryAttempts := d.Get("max_retries").(int)
-	sharedCredsFile := d.Get("shared_credentials_file").(string)
-	profile := d.Get("profile").(string)
 	accessKey := d.Get("access_key").(string)
 	secretKey := d.Get("secret_key").(string)
+	profile := d.Get("profile").(string)
 	token := d.Get("token").(string)
+	sharedCredsFile := d.Get("shared_credentials_file").(string)
 
+	// Build configuration options for the provider
 	options := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
 		config.WithRetryMaxAttempts(maxRetryAttempts),
 	}
 
-	// Add static credentials if access_key and secret_key are provided
+	// Add static credentials if access_key, secret_key, and token are provided
 	if accessKey != "" && secretKey != "" {
 		options = append(options, config.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, token),
 		))
 	}
 
-	// Add shared credentials file and profile if specified
+	// Add shared credentials file if specified
 	if sharedCredsFile != "" {
 		options = append(options, config.WithSharedCredentialsFiles([]string{sharedCredsFile}))
 	}
+
+	// Add profile if specified
 	if profile != "" {
 		options = append(options, config.WithSharedConfigProfile(profile))
 	}
 
-	// Load AWS configuration
+	// Load the default AWS config
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	if err != nil {
 		return nil, diag.FromErr(err)
 	}
 
+	// Return the configured AWS SDK config
 	return cfg, nil
 }
