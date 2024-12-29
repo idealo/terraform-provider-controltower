@@ -4,10 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/aws/aws-sdk-go-v2/config"
 	orgTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	scTypes "github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
-	"log"
 	"regexp"
 	"sync"
 	"time"
@@ -131,11 +129,7 @@ var accountMutex sync.Mutex
 
 func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 
-	// credentials, and shared configuration files
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
+	cfg := m.(aws.Config)
 
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
@@ -231,11 +225,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 }
 
 func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	// credentials, and shared configuration files
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
+	cfg := m.(aws.Config)
 
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
@@ -343,10 +333,8 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 }
 
 func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		log.Fatalf("unable to load SDK config, %v", err)
-	}
+	cfg := m.(aws.Config)
+
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
 
@@ -427,8 +415,9 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
-func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	cfg, err := config.LoadDefaultConfig(ctx)
+func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	cfg := m.(aws.Config)
+
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
 
