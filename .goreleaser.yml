@@ -52,6 +52,7 @@ signs:
       - "--detach-sign"
       - "${artifact}"
 release:
+  prerelease: auto # this recognizes if a tag has a -alpha or -beta in it and marks it as a pre-release in GitHub.
   extra_files:
     - glob: 'terraform-registry-manifest.json'
       name_template: '{{ .ProjectName }}_{{ .Version }}_manifest.json'

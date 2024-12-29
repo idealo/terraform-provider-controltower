@@ -151,8 +151,6 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	// Create a new parameters struct.
-	//migrate this to v2
-
 	params := &servicecatalog.ProvisionProductInput{
 		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
