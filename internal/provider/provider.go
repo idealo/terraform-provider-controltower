@@ -73,8 +73,8 @@ func New(version string) func() *schema.Provider {
 					Optional:    true,
 					Default:     25,
 				},
-				"version": {
-					Description: "The version of the provider.",
+				"provider_version": {
+					Description: "The version of the provider, just used for logging.",
 					Type:        schema.TypeString,
 					Optional:    true,
 					Default:     version,
@@ -125,7 +125,7 @@ func configureProvider(ctx context.Context, d *schema.ResourceData) (interface{}
 	// Load the default AWS config
 	cfg, err := config.LoadDefaultConfig(ctx, options...)
 	config.WithAPIOptions([]func(*smithymw.Stack) error{
-		middleware.AddUserAgentKeyValue("terraform-provider-controltower", d.Get("version").(string)),
+		middleware.AddUserAgentKeyValue("terraform-provider-controltower", d.Get("provider_version").(string)),
 	})
 	if err != nil {
 		return nil, diag.FromErr(err)
