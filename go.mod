@@ -2,7 +2,7 @@ module github.com/idealo/terraform-provider-controltower
 
 go 1.22.7
 
-toolchain go1.23.3
+toolchain go1.23.4
 
 require (
 	github.com/aws/aws-sdk-go v1.55.5
