@@ -2,15 +2,17 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	orgTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
+	scTypes "github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
 	"regexp"
 	"sync"
 	"time"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/organizations"
-	"github.com/aws/aws-sdk-go/service/servicecatalog"
-	"github.com/hashicorp/aws-sdk-go-base/tfawserr"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/organizations"
+	"github.com/aws/aws-sdk-go-v2/service/servicecatalog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
@@ -126,10 +128,13 @@ func resourceAWSAccount() *schema.Resource {
 var accountMutex sync.Mutex
 
 func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	scconn := m.(*AWSClient).scconn
-	organizationsconn := m.(*AWSClient).organizationsconn
 
-	productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
+	cfg := m.(aws.Config)
+
+	scconn := servicecatalog.NewFromConfig(cfg)
+	organizationsconn := organizations.NewFromConfig(cfg)
+
+	productId, artifactId, err := findServiceCatalogAccountProductId(ctx, scconn)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -150,7 +155,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 		ProductId:              productId,
 		ProvisionedProductName: aws.String(ppn),
 		ProvisioningArtifactId: artifactId,
-		ProvisioningParameters: []*servicecatalog.ProvisioningParameter{
+		ProvisioningParameters: []scTypes.ProvisioningParameter{
 			{
 				Key:   aws.String("AccountName"),
 				Value: aws.String(name),
@@ -186,7 +191,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	accountMutex.Lock()
 	defer accountMutex.Unlock()
 
-	account, err := scconn.ProvisionProduct(params)
+	account, err := scconn.ProvisionProduct(ctx, params)
 	if err != nil {
 		return diag.Errorf("error provisioning account %s: %v", name, err)
 	}
@@ -195,7 +200,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	d.SetId(*account.RecordDetail.ProvisionedProductId)
 
 	// Wait for the provisioning to finish.
-	record, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
+	record, diags := waitForProvisioning(ctx, name, account.RecordDetail.RecordId, scconn)
 	if diags.HasError() {
 		return diags
 	}
@@ -204,7 +209,7 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	for _, output := range record.RecordOutputs {
 		switch *output.OutputKey {
 		case "AccountId":
-			_, err := organizationsconn.TagResource(&organizations.TagResourceInput{
+			_, err := organizationsconn.TagResource(ctx, &organizations.TagResourceInput{
 				ResourceId: output.OutputValue,
 				Tags:       toOrganizationsTags(tags),
 			})
@@ -217,17 +222,22 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
-func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	scconn := m.(*AWSClient).scconn
-	organizationsconn := m.(*AWSClient).organizationsconn
+func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	cfg := m.(aws.Config)
 
-	product, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
+	scconn := servicecatalog.NewFromConfig(cfg)
+	organizationsconn := organizations.NewFromConfig(cfg)
+
+	product, err := scconn.DescribeProvisionedProduct(ctx, &servicecatalog.DescribeProvisionedProductInput{
 		Id: aws.String(d.Id()),
 	})
 
-	if !d.IsNewResource() && tfawserr.ErrCodeEquals(err, servicecatalog.ErrCodeResourceNotFoundException) {
-		d.SetId("")
-		return nil
+	if !d.IsNewResource() {
+		var notFoundErr *scTypes.ResourceNotFoundException
+		if errors.As(err, &notFoundErr) {
+			d.SetId("")
+			return nil
+		}
 	}
 	if err != nil {
 		return diag.Errorf("error reading configuration of provisioned product: %v", err)
@@ -237,7 +247,7 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 	if product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId != nil {
 		lastRecordId = product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId
 	}
-	status, err := scconn.DescribeRecord(&servicecatalog.DescribeRecordInput{
+	status, err := scconn.DescribeRecord(ctx, &servicecatalog.DescribeRecordInput{
 		Id: lastRecordId,
 	})
 	if err != nil {
@@ -289,7 +299,7 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		return nil
 	}
 
-	account, err := organizationsconn.DescribeAccount(&organizations.DescribeAccountInput{
+	account, err := organizationsconn.DescribeAccount(ctx, &organizations.DescribeAccountInput{
 		AccountId: aws.String(accountId),
 	})
 	if err != nil {
@@ -299,7 +309,7 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		return diag.FromErr(err)
 	}
 
-	ou, err := findParentOrganizationalUnit(organizationsconn, accountId)
+	ou, err := findParentOrganizationalUnit(ctx, organizationsconn, accountId)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -307,7 +317,7 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 		return diag.FromErr(err)
 	}
 
-	tags, err := organizationsconn.ListTagsForResource(&organizations.ListTagsForResourceInput{
+	tags, err := organizationsconn.ListTagsForResource(ctx, &organizations.ListTagsForResourceInput{
 		ResourceId: aws.String(accountId),
 	})
 	if err != nil {
@@ -321,11 +331,13 @@ func resourceAWSAccountRead(_ context.Context, d *schema.ResourceData, m interfa
 }
 
 func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	scconn := m.(*AWSClient).scconn
-	organizationsconn := m.(*AWSClient).organizationsconn
+	cfg := m.(aws.Config)
+
+	scconn := servicecatalog.NewFromConfig(cfg)
+	organizationsconn := organizations.NewFromConfig(cfg)
 
 	if d.HasChangesExcept("tags", "organizational_unit_id_on_delete", "close_account_on_delete") {
-		productId, artifactId, err := findServiceCatalogAccountProductId(scconn)
+		productId, artifactId, err := findServiceCatalogAccountProductId(ctx, scconn)
 		if err != nil {
 			return diag.FromErr(err)
 		}
@@ -341,7 +353,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 			ProvisionedProductId:   aws.String(d.Id()),
 			ProductId:              productId,
 			ProvisioningArtifactId: artifactId,
-			ProvisioningParameters: []*servicecatalog.UpdateProvisioningParameter{
+			ProvisioningParameters: []scTypes.UpdateProvisioningParameter{
 				{
 					Key:   aws.String("AccountName"),
 					Value: aws.String(name),
@@ -377,13 +389,13 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		accountMutex.Lock()
 		defer accountMutex.Unlock()
 
-		account, err := scconn.UpdateProvisionedProduct(params)
+		account, err := scconn.UpdateProvisionedProduct(ctx, params)
 		if err != nil {
 			return diag.Errorf("error updating provisioned account %s: %v", name, err)
 		}
 
 		// Wait for the provisioning to finish.
-		_, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
+		_, diags := waitForProvisioning(ctx, name, account.RecordDetail.RecordId, scconn)
 		if diags.HasError() {
 			return diags
 		}
@@ -393,7 +405,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		o, n := d.GetChange("tags")
 		accountId := d.Get("account_id").(string)
 
-		if err := updateAccountTags(organizationsconn, accountId, o, n); err != nil {
+		if err := updateAccountTags(ctx, organizationsconn, accountId, o, n); err != nil {
 			return diag.Errorf("error updating AWS Organizations Account (%s) tags: %s", accountId, err)
 		}
 	}
@@ -401,29 +413,34 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
-func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	scconn := m.(*AWSClient).scconn
-	organizationsconn := m.(*AWSClient).organizationsconn
+func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	cfg := m.(aws.Config)
 
-	// Get the name from the config.
+	scconn := servicecatalog.NewFromConfig(cfg)
+	organizationsconn := organizations.NewFromConfig(cfg)
+
 	name := d.Get("name").(string)
 
-	product, err := scconn.DescribeProvisionedProduct(&servicecatalog.DescribeProvisionedProductInput{
+	product, err := scconn.DescribeProvisionedProduct(ctx, &servicecatalog.DescribeProvisionedProductInput{
 		Id: aws.String(d.Id()),
 	})
+
+	if err != nil {
+		return diag.Errorf("error describing provisioned product: %s", err)
+	}
 
 	accountMutex.Lock()
 	defer accountMutex.Unlock()
 
-	account, err := scconn.TerminateProvisionedProduct(&servicecatalog.TerminateProvisionedProductInput{
+	account, err := scconn.TerminateProvisionedProduct(ctx, &servicecatalog.TerminateProvisionedProductInput{
 		ProvisionedProductId: aws.String(d.Id()),
 	})
 	if err != nil {
-		return diag.Errorf("error deleting provisioned account %s: %v", name, err)
+		return diag.Errorf("error deleting provisioned account %s: %s", name, err)
 	}
 
 	// Wait for the provisioning to finish.
-	_, diags := waitForProvisioning(name, account.RecordDetail.RecordId, m)
+	_, diags := waitForProvisioning(ctx, name, account.RecordDetail.RecordId, scconn)
 	if diags.HasError() {
 		return diags
 	}
@@ -431,12 +448,12 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 	accountId, accountExists := d.GetOk("account_id")
 	accountProvisioned := product.ProvisionedProductDetail.LastSuccessfulProvisioningRecordId != nil
 	if newOuId, ok := d.GetOk("organizational_unit_id_on_delete"); ok && accountExists && accountProvisioned {
-		rootId, err := findParentOrganizationRootId(organizationsconn, accountId.(string))
+		rootId, err := findParentOrganizationRootId(ctx, organizationsconn, accountId.(string))
 		if err != nil {
 			return diag.FromErr(err)
 		}
 
-		_, err = organizationsconn.MoveAccount(&organizations.MoveAccountInput{
+		_, err = organizationsconn.MoveAccount(ctx, &organizations.MoveAccountInput{
 			AccountId:           aws.String(accountId.(string)),
 			SourceParentId:      aws.String(rootId),
 			DestinationParentId: aws.String(newOuId.(string)),
@@ -448,11 +465,11 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 
 	closeAccount := d.Get("close_account_on_delete").(bool)
 	if closeAccount && accountExists && accountProvisioned {
-		_, err := organizationsconn.CloseAccount(&organizations.CloseAccountInput{
+		_, err := organizationsconn.CloseAccount(ctx, &organizations.CloseAccountInput{
 			AccountId: aws.String(accountId.(string)),
 		})
 		if err != nil {
-			return diag.Errorf("error closing account %s: %v", accountId, err)
+			return diag.Errorf("error closing account %s: %s", accountId, err)
 		}
 	}
 
@@ -460,9 +477,7 @@ func resourceAWSAccountDelete(_ context.Context, d *schema.ResourceData, m inter
 }
 
 // waitForProvisioning waits until the provisioning finished.
-func waitForProvisioning(name string, recordID *string, m interface{}) (*servicecatalog.DescribeRecordOutput, diag.Diagnostics) {
-	scconn := m.(*AWSClient).scconn
-
+func waitForProvisioning(ctx context.Context, name string, recordID *string, client *servicecatalog.Client) (*servicecatalog.DescribeRecordOutput, diag.Diagnostics) {
 	var (
 		status *servicecatalog.DescribeRecordOutput
 		diags  diag.Diagnostics
@@ -475,19 +490,22 @@ func waitForProvisioning(name string, recordID *string, m interface{}) (*service
 	for {
 		// Get the provisioning status.
 		var err error
-		status, err = scconn.DescribeRecord(record)
+		status, err = client.DescribeRecord(ctx, record)
 		if err != nil {
-			return status, diag.Errorf("error reading provisioning status of account %s: %v", name, err)
+			return status, diag.Errorf("error reading provisioning status of account %s: %s", name, err)
 		}
 
 		// If the provisioning succeeded we are done.
-		if *status.RecordDetail.Status == servicecatalog.RecordStatusSucceeded {
+		if status.RecordDetail.Status == scTypes.RecordStatusSucceeded {
 			break
 		}
 
 		// If the provisioning failed we try to cleanup the tainted account.
-		if *status.RecordDetail.Status == servicecatalog.RecordStatusFailed {
-			return status, diag.Errorf("provisioning account %s failed: %s", name, *status.RecordDetail.RecordErrors[0].Description)
+		if status.RecordDetail.Status == scTypes.RecordStatusFailed {
+			if len(status.RecordDetail.RecordErrors) > 0 {
+				return status, diag.Errorf("provisioning account %s failed: %s", name, *status.RecordDetail.RecordErrors[0].Description)
+			}
+			return status, diag.Errorf("provisioning account %s failed with unknown error", name)
 		}
 
 		// Wait 5 seconds before checking the status again.
@@ -497,12 +515,12 @@ func waitForProvisioning(name string, recordID *string, m interface{}) (*service
 	return status, diags
 }
 
-func findServiceCatalogAccountProductId(conn *servicecatalog.ServiceCatalog) (*string, *string, error) {
-	products, err := conn.SearchProducts(&servicecatalog.SearchProductsInput{
-		Filters: map[string][]*string{"FullTextSearch": {aws.String("AWS Control Tower Account Factory")}},
+func findServiceCatalogAccountProductId(ctx context.Context, client *servicecatalog.Client) (*string, *string, error) {
+	products, err := client.SearchProducts(ctx, &servicecatalog.SearchProductsInput{
+		Filters: map[string][]string{"FullTextSearch": {"AWS Control Tower Account Factory"}},
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("error occured while searching for the account product: %v", err)
+		return nil, nil, fmt.Errorf("error occurred while searching for the account product: %w", err)
 	}
 	if len(products.ProductViewSummaries) != 1 {
 		return nil, nil, fmt.Errorf("unexpected number of search results: %d", len(products.ProductViewSummaries))
@@ -510,17 +528,17 @@ func findServiceCatalogAccountProductId(conn *servicecatalog.ServiceCatalog) (*s
 
 	productId := products.ProductViewSummaries[0].ProductId
 
-	artifacts, err := conn.ListProvisioningArtifacts(&servicecatalog.ListProvisioningArtifactsInput{
+	artifacts, err := client.ListProvisioningArtifacts(ctx, &servicecatalog.ListProvisioningArtifactsInput{
 		ProductId: productId,
 	})
 	if err != nil {
-		return productId, nil, fmt.Errorf("error listing provisioning artifacts: %v", err)
+		return productId, nil, fmt.Errorf("error listing provisioning artifacts: %w", err)
 	}
 
 	// Try to find the active (which should be the latest) artifact.
 	var artifactID *string
 	for _, artifact := range artifacts.ProvisioningArtifactDetails {
-		if *artifact.Active {
+		if artifact.Active != nil && *artifact.Active {
 			artifactID = artifact.Id
 			break
 		}
@@ -531,89 +549,100 @@ func findServiceCatalogAccountProductId(conn *servicecatalog.ServiceCatalog) (*s
 
 	return productId, artifactID, nil
 }
-
-func findParentOrganizationalUnit(conn *organizations.Organizations, identifier string) (*organizations.OrganizationalUnit, error) {
-	parents, err := conn.ListParents(&organizations.ListParentsInput{
+func findParentOrganizationalUnit(ctx context.Context, client *organizations.Client, identifier string) (*orgTypes.OrganizationalUnit, error) {
+	paginator := organizations.NewListParentsPaginator(client, &organizations.ListParentsInput{
 		ChildId: aws.String(identifier),
 	})
-	if err != nil {
-		return nil, fmt.Errorf("error reading parents for %s: %v", identifier, err)
-	}
 
 	var parentOuId string
-	for _, v := range parents.Parents {
-		if *v.Type == organizations.ParentTypeOrganizationalUnit {
-			parentOuId = *v.Id
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error reading parents for %s: %w", identifier, err)
+		}
+
+		for _, parent := range output.Parents {
+			if parent.Type == orgTypes.ParentTypeOrganizationalUnit {
+				parentOuId = *parent.Id
+				break
+			}
+		}
+		if parentOuId != "" {
 			break
 		}
 	}
+
 	if parentOuId == "" {
 		return nil, fmt.Errorf("no OU parent found for %s", identifier)
 	}
 
-	ou, err := conn.DescribeOrganizationalUnit(&organizations.DescribeOrganizationalUnitInput{
+	ouOutput, err := client.DescribeOrganizationalUnit(ctx, &organizations.DescribeOrganizationalUnitInput{
 		OrganizationalUnitId: aws.String(parentOuId),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("error describing parent OU %s: %v", parentOuId, err)
+		return nil, fmt.Errorf("error describing parent OU %s: %w", parentOuId, err)
 	}
 
-	return ou.OrganizationalUnit, nil
+	return ouOutput.OrganizationalUnit, nil
 }
 
-func findParentOrganizationRootId(conn *organizations.Organizations, identifier string) (string, error) {
-	parents, err := conn.ListParents(&organizations.ListParentsInput{
+func findParentOrganizationRootId(ctx context.Context, client *organizations.Client, identifier string) (string, error) {
+	paginator := organizations.NewListParentsPaginator(client, &organizations.ListParentsInput{
 		ChildId: aws.String(identifier),
 	})
-	if err != nil {
-		return "", fmt.Errorf("error reading parents for %s: %v", identifier, err)
-	}
 
-	for _, v := range parents.Parents {
-		if *v.Type == organizations.ParentTypeRoot {
-			return *v.Id, nil
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return "", fmt.Errorf("error reading parents for %s: %w", identifier, err)
+		}
+
+		for _, parent := range output.Parents {
+			if parent.Type == orgTypes.ParentTypeRoot {
+				return *parent.Id, nil
+			}
 		}
 	}
 
 	return "", fmt.Errorf("no organization root parent found for %s", identifier)
 }
 
-func toOrganizationsTags(tags map[string]interface{}) []*organizations.Tag {
-	result := make([]*organizations.Tag, 0, len(tags))
+func toOrganizationsTags(tags map[string]interface{}) []orgTypes.Tag {
+	result := make([]orgTypes.Tag, 0, len(tags))
 
 	for k, v := range tags {
-		tag := &organizations.Tag{
+		tag := &orgTypes.Tag{
 			Key:   aws.String(k),
 			Value: aws.String(v.(string)),
 		}
 
-		result = append(result, tag)
+		result = append(result, *tag)
 	}
 
 	return result
 }
 
-func fromOrganizationTags(tags []*organizations.Tag) map[string]*string {
+func fromOrganizationTags(tags []orgTypes.Tag) map[string]*string {
 	m := make(map[string]*string, len(tags))
 
 	for _, tag := range tags {
-		m[aws.StringValue(tag.Key)] = tag.Value
+		m[*tag.Key] = tag.Value
 	}
 
 	return m
 }
 
-func updateAccountTags(conn *organizations.Organizations, identifier string, oldTags interface{}, newTags interface{}) error {
+func updateAccountTags(ctx context.Context, client *organizations.Client, identifier string, oldTags interface{}, newTags interface{}) error {
 	oldTagsMap := oldTags.(map[string]interface{})
 	newTagsMap := newTags.(map[string]interface{})
 
 	if removedTags := removedTags(oldTagsMap, newTagsMap); len(removedTags) > 0 {
 		input := &organizations.UntagResourceInput{
 			ResourceId: aws.String(identifier),
-			TagKeys:    aws.StringSlice(keys(removedTags)),
+			TagKeys:    keys(removedTags),
 		}
 
-		_, err := conn.UntagResource(input)
+		_, err := client.UntagResource(ctx, input)
 
 		if err != nil {
 			return fmt.Errorf("error untagging resource (%s): %w", identifier, err)
@@ -626,7 +655,7 @@ func updateAccountTags(conn *organizations.Organizations, identifier string, old
 			Tags:       toOrganizationsTags(updatedTags),
 		}
 
-		_, err := conn.TagResource(input)
+		_, err := client.TagResource(ctx, input)
 
 		if err != nil {
 			return fmt.Errorf("error tagging resource (%s): %w", identifier, err)

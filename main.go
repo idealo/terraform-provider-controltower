@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"log"
 
@@ -34,14 +33,10 @@ func main() {
 	flag.BoolVar(&debugMode, "debug", false, "set to true to run the provider with support for debuggers like delve")
 	flag.Parse()
 
-	opts := &plugin.ServeOpts{ProviderFunc: provider.New(version)}
+	opts := &plugin.ServeOpts{ProviderFunc: provider.New(version), ProviderAddr: "registry.terraform.io/idealo/controltower", Debug: debugMode}
 
 	if debugMode {
-		err := plugin.Debug(context.Background(), "registry.terraform.io/idealo/controltower", opts)
-		if err != nil {
-			log.Fatal(err.Error())
-		}
-		return
+		log.Println("Starting provider in debug mode...")
 	}
 
 	plugin.Serve(opts)
