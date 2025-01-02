@@ -18,7 +18,7 @@ resource "controltower_aws_account" "account" {
   email               = "aws-admin@example.com"
   organizational_unit = "Sandbox"
 
-  organizational_unit_id_on_delete = "Suspended"
+  organizational_unit_id_on_delete = "ou-some-id"
 
   sso {
     first_name = "John"
@@ -41,7 +41,6 @@ resource "controltower_aws_account" "account" {
 ### Optional
 
 - `close_account_on_delete` (Boolean) If enabled, this will close the AWS account on resource deletion, beginning the 90-day suspension period. Otherwise, the account will just be unenrolled from Control Tower.
-- `id` (String) The ID of this resource.
 - `organizational_unit_id_on_delete` (String) ID of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.
 - `path_id` (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
 - `provisioned_product_name` (String) Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.
@@ -50,6 +49,7 @@ resource "controltower_aws_account" "account" {
 ### Read-Only
 
 - `account_id` (String) ID of the AWS account.
+- `id` (String) The ID of this resource.
 
 <a id="nestedblock--sso"></a>
 ### Nested Schema for `sso`
@@ -59,5 +59,3 @@ Required:
 - `email` (String) Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.
 - `first_name` (String) First name of the user.
 - `last_name` (String) Last name of the user.
-
-

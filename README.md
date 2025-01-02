@@ -33,3 +33,5 @@ $ mv bin/terraform-provider-controltower_<some version> ~/.terraform.d/plugins/r
 Then you can test your changes in your terraform configuration by running `terraform init` in the directory where your terraform configuration is located. 
 
 Make sure to define the new version under the `required_providers` block. 
+
+Alternatively, if you're using terraform 0.14 or later, you can make use of `dev_overrides` as described [here](https://developer.hashicorp.com/terraform/cli/config/config-file#development-overrides-for-provider-developers) and point the provider to your `~/.terraformrc`.
