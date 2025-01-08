@@ -6,6 +6,7 @@ import (
 	"fmt"
 	orgTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	scTypes "github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 	"regexp"
 	"sync"
 	"time"
@@ -73,6 +74,22 @@ func resourceAWSAccount() *schema.Resource {
 							Type:         schema.TypeString,
 							Required:     true,
 							ValidateFunc: validateEmailAddress,
+						},
+						"instance_arn": {
+							Description: "ARN of the SSO instance. Required if remove_account_assignment_on_update is enabled.",
+							Type:        schema.TypeString,
+							Required:    false,
+						},
+						"remove_account_assignment_on_update": {
+							Description: "If enabled, this will remove the account assignment for the old SSO user when the resource is updated.",
+							Type:        schema.TypeBool,
+							Optional:    true,
+							Default:     false,
+						},
+						"principal_id": {
+							Description: "Principal ID of the user. Required if remove_account_assignment_on_update is enabled.",
+							Type:        schema.TypeString,
+							Required:    false,
 						},
 					},
 				},
@@ -410,7 +427,45 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		}
 	}
 
+	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
+	isRemoveAccountAssignmentOnUpdate := sso["remove_account_assignment_on_update"].(bool)
+
+	if d.HasChange("sso") && isRemoveAccountAssignmentOnUpdate {
+		ssoadmincon := ssoadmin.NewFromConfig(cfg)
+		accountId := d.Get("account_id").(string)
+		o, n := d.GetChange("sso")
+		if err := updateAccountAssignment(ctx, d, ssoadmincon, accountId, o, n); err != nil {
+			return diag.Errorf("error updating account assignment: %v", err)
+		}
+	}
+
 	return resourceAWSAccountRead(ctx, d, m)
+}
+
+func updateAccountAssignment(ctx context.Context, d *schema.ResourceData, ssoadmincon *ssoadmin.Client, accountId string, oldSSO interface{}, newSSO interface{}) error {
+
+	oldSSOMap := oldSSO.([]interface{})[0].(map[string]interface{})
+	newSSOMap := newSSO.([]interface{})[0].(map[string]interface{})
+	oldEmail := oldSSOMap["email"].(string)
+	newEmail := newSSOMap["email"].(string)
+	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
+	instanceArn := sso["instance_arn"].(string)
+	oldPrincipalId := oldSSOMap["principal_id"].(string)
+
+	if oldEmail != newEmail && oldPrincipalId != "" && instanceArn != "" {
+
+		_, err := ssoadmincon.DeleteAccountAssignment(ctx, &ssoadmin.DeleteAccountAssignmentInput{
+			InstanceArn:   &instanceArn,
+			TargetId:      &accountId,
+			TargetType:    "AWS_ACCOUNT",
+			PrincipalType: "USER",
+			PrincipalId:   &oldPrincipalId,
+		})
+		if err != nil {
+			return fmt.Errorf("error unassigning SSO user from account (%s): %v", accountId, err)
+		}
+	}
+	return nil
 }
 
 func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
