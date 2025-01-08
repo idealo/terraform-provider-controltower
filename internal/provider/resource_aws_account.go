@@ -79,6 +79,7 @@ func resourceAWSAccount() *schema.Resource {
 							Description: "ARN of the SSO instance. Required if remove_account_assignment_on_update is enabled.",
 							Type:        schema.TypeString,
 							Required:    false,
+							Optional:    true,
 						},
 						"remove_account_assignment_on_update": {
 							Description: "If enabled, this will remove the account assignment for the old SSO user when the resource is updated.",
@@ -90,6 +91,7 @@ func resourceAWSAccount() *schema.Resource {
 							Description: "Principal ID of the user. Required if remove_account_assignment_on_update is enabled.",
 							Type:        schema.TypeString,
 							Required:    false,
+							Optional:    true,
 						},
 					},
 				},

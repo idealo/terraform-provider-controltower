@@ -59,3 +59,9 @@ Required:
 - `email` (String) Email address of the user. If you use automatic provisioning this email address should already exist in AWS SSO.
 - `first_name` (String) First name of the user.
 - `last_name` (String) Last name of the user.
+
+Optional:
+
+- `instance_arn` (String) ARN of the SSO instance. Required if remove_account_assignment_on_update is enabled.
+- `principal_id` (String) Principal ID of the user. Required if remove_account_assignment_on_update is enabled.
+- `remove_account_assignment_on_update` (Boolean) If enabled, this will remove the account assignment for the old SSO user when the resource is updated.
