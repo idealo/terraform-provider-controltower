@@ -354,6 +354,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
+	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 	if d.HasChangesExcept("tags", "organizational_unit_id_on_delete", "close_account_on_delete") {
 		productId, artifactId, err := findServiceCatalogAccountProductId(ctx, scconn)
@@ -365,7 +366,6 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		name := d.Get("name").(string)
 		email := d.Get("email").(string)
 		ou := d.Get("organizational_unit").(string)
-		sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 		// Create a new parameters struct.
 		params := &servicecatalog.UpdateProvisionedProductInput{
@@ -429,7 +429,6 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		}
 	}
 
-	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 	isRemoveAccountAssignmentOnUpdate := sso["remove_account_assignment_on_update"].(bool)
 
 	if d.HasChange("sso") && isRemoveAccountAssignmentOnUpdate {
