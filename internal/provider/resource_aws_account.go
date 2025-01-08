@@ -452,8 +452,9 @@ func updateAccountAssignment(ctx context.Context, d *schema.ResourceData, ssoadm
 	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 	instanceArn := sso["instance_arn"].(string)
 	oldPrincipalId := oldSSOMap["principal_id"].(string)
+	newPrincipalId := newSSOMap["principal_id"].(string)
 
-	if oldEmail != newEmail && oldPrincipalId != "" && instanceArn != "" {
+	if oldEmail != newEmail && oldPrincipalId != newPrincipalId && oldPrincipalId != "" && instanceArn != "" {
 
 		_, err := ssoadmincon.DeleteAccountAssignment(ctx, &ssoadmin.DeleteAccountAssignmentInput{
 			InstanceArn:   &instanceArn,
