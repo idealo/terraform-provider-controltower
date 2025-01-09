@@ -93,6 +93,12 @@ func resourceAWSAccount() *schema.Resource {
 							Required:    false,
 							Optional:    true,
 						},
+						"permission_set_arn": {
+							Description: "ARN of the permission set to be removed, normally it's the arn of AWSAdministratorAccess permission set. Required if remove_account_assignment_on_update is enabled.",
+							Type:        schema.TypeString,
+							Required:    false,
+							Optional:    true,
+						},
 					},
 				},
 			},
@@ -453,15 +459,17 @@ func updateAccountAssignment(ctx context.Context, d *schema.ResourceData, ssoadm
 	instanceArn := sso["instance_arn"].(string)
 	oldPrincipalId := oldSSOMap["principal_id"].(string)
 	newPrincipalId := newSSOMap["principal_id"].(string)
+	permissionSetArn := newSSOMap["permission_set_arn"].(string)
 
-	if oldEmail != newEmail && oldPrincipalId != newPrincipalId && oldPrincipalId != "" && instanceArn != "" {
+	if oldEmail != newEmail && oldPrincipalId != newPrincipalId && instanceArn != "" && permissionSetArn != "" {
 
 		_, err := ssoadmincon.DeleteAccountAssignment(ctx, &ssoadmin.DeleteAccountAssignmentInput{
-			InstanceArn:   &instanceArn,
-			TargetId:      &accountId,
-			TargetType:    "AWS_ACCOUNT",
-			PrincipalType: "USER",
-			PrincipalId:   &oldPrincipalId,
+			InstanceArn:      &instanceArn,
+			TargetId:         &accountId,
+			TargetType:       "AWS_ACCOUNT",
+			PrincipalType:    "USER",
+			PrincipalId:      &oldPrincipalId,
+			PermissionSetArn: &permissionSetArn,
 		})
 		if err != nil {
 			return fmt.Errorf("error unassigning SSO user from account (%s): %v", accountId, err)
