@@ -40,7 +40,7 @@ provider_installation {
 }
 
 ```
-Then you can test your changes in your terraform configuration by running `terraform init` in the directory where your terraform configuration is located. 
+Then you can test your changes in your terraform configuration by running `terraform init` (which will fail but that's expected) and then `terraform plan` in the directory where your terraform configuration is located. 
 
 Make sure to define the new version under the `required_providers` block. 
 
