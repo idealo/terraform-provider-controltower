@@ -431,7 +431,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 	isRemoveAccountAssignmentOnUpdate := sso["remove_account_assignment_on_update"].(bool)
 
-	if d.HasChange("sso") && isRemoveAccountAssignmentOnUpdate {
+	if isRemoveAccountAssignmentOnUpdate && d.HasChange("sso") {
 		ssoadminconn := ssoadmin.NewFromConfig(cfg)
 		identitystoreconn := identitystore.NewFromConfig(cfg)
 
@@ -458,22 +458,10 @@ func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client,
 	if err != nil {
 		return fmt.Errorf("error listing SSO instances: %v", err)
 	}
-	identityStoreId := ssoInstances.Instances[0].IdentityStoreId
 	instanceArn := ssoInstances.Instances[0].InstanceArn
-
-	alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
-		Value: types.UniqueAttribute{
-			AttributePath:  aws.String("UserName"),
-			AttributeValue: document.NewLazyDocument(oldEmail),
-		},
-	}
-
-	principal, err := identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
-		IdentityStoreId:     identityStoreId,
-		AlternateIdentifier: alternateIdentifier,
-	})
+	principalUserId, err := findPrincipalUserId(ctx, ssoInstances, oldEmail, err, identitystoreconn)
 	if err != nil {
-		return fmt.Errorf("error getting principal id: %v", err)
+		return err
 	}
 
 	permissionSetArn, err := findPermissionSetArn(ctx, ssoadminconn, instanceArn, permissionSetName)
@@ -488,7 +476,7 @@ func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client,
 			TargetId:         &accountId,
 			TargetType:       "AWS_ACCOUNT",
 			PrincipalType:    "USER",
-			PrincipalId:      principal.UserId,
+			PrincipalId:      principalUserId,
 			PermissionSetArn: &permissionSetArn,
 		})
 		if err != nil {
@@ -496,6 +484,26 @@ func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client,
 		}
 	}
 	return nil
+}
+
+func findPrincipalUserId(ctx context.Context, ssoInstances *ssoadmin.ListInstancesOutput, oldEmail string, err error, identitystoreconn *identitystore.Client) (*string, error) {
+	identityStoreId := ssoInstances.Instances[0].IdentityStoreId
+
+	alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
+		Value: types.UniqueAttribute{
+			AttributePath:  aws.String("UserName"),
+			AttributeValue: document.NewLazyDocument(oldEmail),
+		},
+	}
+
+	principal, err := identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
+		IdentityStoreId:     identityStoreId,
+		AlternateIdentifier: alternateIdentifier,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error getting principal id: %v", err)
+	}
+	return principal.UserId, nil
 }
 func findPermissionSetArn(ctx context.Context, ssoadminconn *ssoadmin.Client, instanceArn *string, permissionSetName string) (string, error) {
 	paginator := ssoadmin.NewListPermissionSetsPaginator(ssoadminconn, &ssoadmin.ListPermissionSetsInput{
