@@ -26,12 +26,22 @@ You can test the provider locally before creating a PR by following the steps be
 
 ```sh
 $ make build # make sure to have the build version in the executable name as a postfix e.g. terraform-provider-controltower_v2.0.0
-$ mkdir -p ~/.terraform.d/plugins/registry.terraform.io/idealo/controltower/<some version>/darwin_arm64 # arch can be different depending on your system
-$ mv bin/terraform-provider-controltower_<some version> ~/.terraform.d/plugins/registry.terraform.io/idealo/controltower/<some version>/darwin_arm64 # some version should be the future version of the provider after the changes.
 ```
+create a `~/.terraformrc` file your home directory with the following content:
+```hcl
+provider_installation {
+  dev_overrides {
+    "registry.terraform.io/idealo/controltower" = "path-to-the-built-binary/terraform-provider-controltower"  # e.g /Users/username/repo/terraform-provider-controltower/bin/terraform-provider-controltower"
+  }
+  # For all other providers, install them directly from their origin provider
+  # registries as normal. If you omit this, Terraform will _only_ use
+  # the dev_overrides block, and so no other providers will be available.
+  direct {}
+}
 
-Then you can test your changes in your terraform configuration by running `terraform init` in the directory where your terraform configuration is located. 
+```
+Then you can test your changes in your terraform configuration by running `terraform init` (which will fail but that's expected) and then `terraform plan` in the directory where your terraform configuration is located. 
 
 Make sure to define the new version under the `required_providers` block. 
 
-Alternatively, if you're using terraform 0.14 or later, you can make use of `dev_overrides` as described [here](https://developer.hashicorp.com/terraform/cli/config/config-file#development-overrides-for-provider-developers) and point the provider to your `~/.terraformrc`.
+A complete reference can be found [here](https://developer.hashicorp.com/terraform/cli/config/config-file#development-overrides-for-provider-developers).

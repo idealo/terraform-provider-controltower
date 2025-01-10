@@ -4,8 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/service/identitystore"
+	"github.com/aws/aws-sdk-go-v2/service/identitystore/document"
+
+	"github.com/aws/aws-sdk-go-v2/service/identitystore/types"
 	orgTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	scTypes "github.com/aws/aws-sdk-go-v2/service/servicecatalog/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
+
 	"regexp"
 	"sync"
 	"time"
@@ -73,6 +79,19 @@ func resourceAWSAccount() *schema.Resource {
 							Type:         schema.TypeString,
 							Required:     true,
 							ValidateFunc: validateEmailAddress,
+						},
+						"remove_account_assignment_on_update": {
+							Description: "If enabled, this will remove the account assignment for the old SSO user when the resource is updated.",
+							Type:        schema.TypeBool,
+							Optional:    true,
+							Default:     false,
+						},
+						"permission_set_name": {
+							Description: "Permission set name for the sso user. Defaults to AWSAdministratorAccess.",
+							Type:        schema.TypeString,
+							Required:    false,
+							Optional:    true,
+							Default:     "AWSAdministratorAccess",
 						},
 					},
 				},
@@ -335,6 +354,7 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 
 	scconn := servicecatalog.NewFromConfig(cfg)
 	organizationsconn := organizations.NewFromConfig(cfg)
+	sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 	if d.HasChangesExcept("tags", "organizational_unit_id_on_delete", "close_account_on_delete") {
 		productId, artifactId, err := findServiceCatalogAccountProductId(ctx, scconn)
@@ -346,7 +366,6 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		name := d.Get("name").(string)
 		email := d.Get("email").(string)
 		ou := d.Get("organizational_unit").(string)
-		sso := d.Get("sso").([]interface{})[0].(map[string]interface{})
 
 		// Create a new parameters struct.
 		params := &servicecatalog.UpdateProvisionedProductInput{
@@ -410,9 +429,106 @@ func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m int
 		}
 	}
 
+	isRemoveAccountAssignmentOnUpdate := sso["remove_account_assignment_on_update"].(bool)
+
+	if isRemoveAccountAssignmentOnUpdate && d.HasChange("sso") {
+		ssoadminconn := ssoadmin.NewFromConfig(cfg)
+		identitystoreconn := identitystore.NewFromConfig(cfg)
+
+		accountId := d.Get("account_id").(string)
+		permissionSetName := sso["permission_set_name"].(string)
+
+		o, n := d.GetChange("sso")
+		if err := updateAccountAssignment(ctx, ssoadminconn, identitystoreconn, accountId, permissionSetName, o, n); err != nil {
+			return diag.Errorf("error updating account assignment: %v", err)
+		}
+	}
+
 	return resourceAWSAccountRead(ctx, d, m)
 }
 
+func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client, identitystoreconn *identitystore.Client, accountId string, permissionSetName string, oldSSO interface{}, newSSO interface{}) error {
+
+	oldSSOMap := oldSSO.([]interface{})[0].(map[string]interface{})
+	newSSOMap := newSSO.([]interface{})[0].(map[string]interface{})
+	oldEmail := oldSSOMap["email"].(string)
+	newEmail := newSSOMap["email"].(string)
+
+	ssoInstances, err := ssoadminconn.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
+	if err != nil {
+		return fmt.Errorf("error listing SSO instances: %v", err)
+	}
+	instanceArn := ssoInstances.Instances[0].InstanceArn
+	principalUserId, err := findPrincipalUserId(ctx, ssoInstances, oldEmail, err, identitystoreconn)
+	if err != nil {
+		return err
+	}
+
+	permissionSetArn, err := findPermissionSetArn(ctx, ssoadminconn, instanceArn, permissionSetName)
+
+	if err != nil {
+		return fmt.Errorf("error finding permission set: %v", err)
+	}
+	if oldEmail != newEmail {
+
+		_, err := ssoadminconn.DeleteAccountAssignment(ctx, &ssoadmin.DeleteAccountAssignmentInput{
+			InstanceArn:      instanceArn,
+			TargetId:         &accountId,
+			TargetType:       "AWS_ACCOUNT",
+			PrincipalType:    "USER",
+			PrincipalId:      principalUserId,
+			PermissionSetArn: &permissionSetArn,
+		})
+		if err != nil {
+			return fmt.Errorf("error unassigning SSO user from account (%s): %v", accountId, err)
+		}
+	}
+	return nil
+}
+
+func findPrincipalUserId(ctx context.Context, ssoInstances *ssoadmin.ListInstancesOutput, oldEmail string, err error, identitystoreconn *identitystore.Client) (*string, error) {
+	identityStoreId := ssoInstances.Instances[0].IdentityStoreId
+
+	alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
+		Value: types.UniqueAttribute{
+			AttributePath:  aws.String("UserName"),
+			AttributeValue: document.NewLazyDocument(oldEmail),
+		},
+	}
+
+	principal, err := identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
+		IdentityStoreId:     identityStoreId,
+		AlternateIdentifier: alternateIdentifier,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error getting principal id: %v", err)
+	}
+	return principal.UserId, nil
+}
+func findPermissionSetArn(ctx context.Context, ssoadminconn *ssoadmin.Client, instanceArn *string, permissionSetName string) (string, error) {
+	paginator := ssoadmin.NewListPermissionSetsPaginator(ssoadminconn, &ssoadmin.ListPermissionSetsInput{
+		InstanceArn: instanceArn,
+	})
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return "", fmt.Errorf("error listing permission sets: %w", err)
+		}
+		for _, permissionSetArn := range output.PermissionSets {
+			describeInput, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+				InstanceArn:      instanceArn,
+				PermissionSetArn: &permissionSetArn,
+			})
+			if err != nil {
+				return "", fmt.Errorf("error describing permission set: %w", err)
+			}
+			if *describeInput.PermissionSet.Name == permissionSetName {
+				return permissionSetArn, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("permission set not found")
+}
 func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	cfg := m.(aws.Config)
 
