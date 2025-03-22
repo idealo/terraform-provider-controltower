@@ -44,7 +44,7 @@ resource "controltower_aws_account" "account" {
 - `organizational_unit_id_on_delete` (String) ID of the Organizational Unit to which the account should be moved when the resource is deleted. If no value is provided, the account will not be moved.
 - `path_id` (String) Name of the path identifier of the product. This value is optional if the product has a default path, and required if the product has more than one path. To list the paths for a product, use ListLaunchPaths.
 - `provisioned_product_name` (String) Name of the service catalog product that is provisioned. Defaults to a slugified version of the account name.
-- `tags` (Map of String) Key-value map of resource tags for the account.
+- `tags` (Map of String) Key-value map of resource tags for the account.   
 
 ### Read-Only
 
@@ -64,3 +64,13 @@ Optional:
 
 - `permission_set_name` (String) Permission set name for the sso user. Defaults to AWSAdministratorAccess.
 - `remove_account_assignment_on_update` (Boolean) If enabled, this will remove the account assignment for the old SSO user when the resource is updated.
+
+
+## Timeouts
+
+[Configuration options](https://developer.hashicorp.com/terraform/language/resources/syntax#operation-timeouts):
+
+- `read`   - (Default `20m`)
+- `create` - (Default `20m`)
+- `update` - (Default `20m`)
+- `delete` - (Default `20m`)
