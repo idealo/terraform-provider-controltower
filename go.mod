@@ -1,16 +1,17 @@
 module github.com/idealo/terraform-provider-controltower
 
-go 1.22.7
-toolchain go1.24.1
+go 1.23.0
+
+toolchain go1.24.2
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.36.3
-	github.com/aws/aws-sdk-go-v2/config v1.29.12
-	github.com/aws/aws-sdk-go-v2/credentials v1.17.65
-	github.com/aws/aws-sdk-go-v2/service/identitystore v1.28.1
-	github.com/aws/aws-sdk-go-v2/service/organizations v1.38.1
-	github.com/aws/aws-sdk-go-v2/service/servicecatalog v1.33.1
-	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.30.1
+	github.com/aws/aws-sdk-go-v2/config v1.29.14
+	github.com/aws/aws-sdk-go-v2/credentials v1.17.67
+	github.com/aws/aws-sdk-go-v2/service/identitystore v1.28.2
+	github.com/aws/aws-sdk-go-v2/service/organizations v1.38.3
+	github.com/aws/aws-sdk-go-v2/service/servicecatalog v1.33.4
+	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.30.2
 	github.com/aws/smithy-go v1.22.3
 	github.com/hashicorp/terraform-plugin-docs v0.21.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.36.1
@@ -32,9 +33,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.8.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.12.3 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.12.15 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.25.2 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.0 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.33.17 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.25.3 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.30.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.33.19 // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.8.1 // indirect
 	github.com/cloudflare/circl v1.3.7 // indirect
