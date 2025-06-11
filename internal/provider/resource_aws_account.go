@@ -37,9 +37,9 @@ func resourceAWSAccount() *schema.Resource {
 		ReadContext:   resourceAWSAccountRead,
 		UpdateContext: resourceAWSAccountUpdate,
 		DeleteContext: resourceAWSAccountDelete,
-		Importer: &schema.ResourceImporter{
-			StateContext: schema.ImportStatePassthroughContext,
-		},
+	    Importer: &schema.ResourceImporter{
+          StateContext: resourceAWSAccountImportState,
+        },
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -597,6 +597,95 @@ func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m int
 	}
 
 	return nil
+}
+
+func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
+    // Get account ID from import command
+    accountID := d.Id()
+
+    // Set up AWS clients
+    cfg := meta.(aws.Config)
+    scconn := servicecatalog.NewFromConfig(cfg)
+
+    // Find the Control Tower Account Factory product
+    productId, _, err := findServiceCatalogAccountProductId(ctx, scconn)
+    if err != nil {
+        return nil, fmt.Errorf("error finding Control Tower Account Factory product: %w", err)
+    }
+
+    // Search for the provisioned product matching this account
+    searchPaginator := servicecatalog.NewSearchProvisionedProductsPaginator(scconn, &servicecatalog.SearchProvisionedProductsInput{
+        Filters: map[string][]string{
+            "ProductId": {*productId},
+        },
+    })
+
+    // Loop through pages of results
+    for searchPaginator.HasMorePages() {
+        page, err := searchPaginator.NextPage(ctx)
+        if err != nil {
+            return nil, fmt.Errorf("error searching provisioned products: %w", err)
+        }
+
+        // Check each provisioned product
+        for _, product := range page.ProvisionedProducts {
+            // Skip products without successful provisioning
+            if product.LastSuccessfulProvisioningRecordId == nil {
+                continue
+            }
+
+            // Get record details
+            record, err := scconn.DescribeRecord(ctx, &servicecatalog.DescribeRecordInput{
+                Id: product.LastSuccessfulProvisioningRecordId,
+            })
+            if err != nil {
+                continue
+            }
+
+            // Look for account ID match in outputs
+            for _, output := range record.RecordDetail.RecordOutputs {
+                if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
+                    // Found the matching account - set resource ID to provisioned product ID
+                    d.SetId(*product.Id)
+
+                    // Create SSO map with default values for required fields
+                    ssoMap := make(map[string]interface{})
+                    ssoMap["first_name"] = "ImportedUser"
+                    ssoMap["last_name"] = "DoNotChange"
+                    ssoMap["permission_set_name"] = "AWSAdministratorAccess"
+                    ssoMap["remove_account_assignment_on_update"] = false
+
+                    // Try to find email from record outputs
+                    for _, output := range record.RecordDetail.RecordOutputs {
+                        if *output.OutputKey == "SSOUserEmail" {
+                            ssoMap["email"] = *output.OutputValue
+                            break
+                        }
+                    }
+
+                    // If email not found, try to use account email
+                    if _, ok := ssoMap["email"]; !ok {
+                        for _, output := range record.RecordDetail.RecordOutputs {
+                            if *output.OutputKey == "AccountEmail" {
+                                ssoMap["email"] = *output.OutputValue
+                                break
+                            }
+                        }
+                    }
+
+                    // Set SSO configuration in state
+                    if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
+                        return nil, fmt.Errorf("error setting SSO values: %w", err)
+                    }
+
+                    // Let the Read function handle the rest
+                    return schema.ImportStatePassthroughContext(ctx, d, meta)
+                }
+            }
+        }
+    }
+
+    return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
 }
 
 // waitForProvisioning waits until the provisioning finished.
