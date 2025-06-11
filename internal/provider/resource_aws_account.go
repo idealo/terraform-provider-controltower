@@ -685,7 +685,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
         return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
     }
 
-    // Create SSO map with default values that will be overridden if possible
+    // Create SSO map with default values
     ssoMap := map[string]interface{}{
         "first_name":                       "ImportedUser",
         "last_name":                        "DoNotChange",
@@ -737,42 +737,66 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
             })
         }
 
-        // If we found the user, get their details
+        // If we found the user, get their details if possible
         if err == nil && getUserIdResp.UserId != nil {
             userId := getUserIdResp.UserId
 
-            // Get user details
-            userDetails, err := identitystoreconn.GetUser(ctx, &identitystore.GetUserInput{
+            // ListUsers to find matching user instead of GetUser
+            listUsersInput := &identitystore.ListUsersInput{
                 IdentityStoreId: identityStoreId,
-                UserId:          userId,
-            })
+                Filters: []types.Filter{
+                    {
+                        AttributePath:  aws.String("UserId"),
+                        AttributeValue: document.NewLazyDocument(*userId),
+                    },
+                },
+            }
 
-            if err == nil && userDetails.Name != nil {
-                if userDetails.Name.GivenName != nil {
-                    ssoMap["first_name"] = *userDetails.Name.GivenName
-                }
-                if userDetails.Name.FamilyName != nil {
-                    ssoMap["last_name"] = *userDetails.Name.FamilyName
+            listUsersOutput, err := identitystoreconn.ListUsers(ctx, listUsersInput)
+            if err == nil && len(listUsersOutput.Users) > 0 {
+                user := listUsersOutput.Users[0]
+
+                if user.Name != nil {
+                    if user.Name.GivenName != nil {
+                        ssoMap["first_name"] = *user.Name.GivenName
+                    }
+                    if user.Name.FamilyName != nil {
+                        ssoMap["last_name"] = *user.Name.FamilyName
+                    }
                 }
             }
 
-            // Get permission set assignment
-            assignments, err := ssoadminconn.ListAccountAssignments(ctx, &ssoadmin.ListAccountAssignmentsInput{
-                AccountId:     aws.String(accountID),
-                InstanceArn:   instanceArn,
-                PrincipalId:   userId,
-                PrincipalType: types.PrincipalTypeUser,
-            })
+            // Get permission set assignment - with correct field names
+            listAssignmentsInput := &ssoadmin.ListAccountAssignmentsInput{
+                AccountId:      aws.String(accountID),
+                InstanceArn:    instanceArn,
+                MaxResults:     aws.Int32(10),
+            }
 
-            if err == nil && len(assignments.AccountAssignments) > 0 {
-                permissionSetArn := assignments.AccountAssignments[0].PermissionSetArn
-                permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
-                    InstanceArn:      instanceArn,
-                    PermissionSetArn: permissionSetArn,
-                })
+            // Loop through assignments to find the one for this user
+            assignmentsPaginator := ssoadmin.NewListAccountAssignmentsPaginator(ssoadminconn, listAssignmentsInput)
+            for assignmentsPaginator.HasMorePages() {
+                page, err := assignmentsPaginator.NextPage(ctx)
+                if err != nil {
+                    break
+                }
 
-                if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
-                    ssoMap["permission_set_name"] = *permSet.PermissionSet.Name
+                for _, assignment := range page.AccountAssignments {
+                    if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
+                        permissionSetArn := assignment.PermissionSetArn
+
+                        // Get permission set details
+                        permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+                            InstanceArn:      instanceArn,
+                            PermissionSetArn: permissionSetArn,
+                        })
+
+                        if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
+                            ssoMap["permission_set_name"] = *permSet.PermissionSet.Name
+                        }
+
+                        break
+                    }
                 }
             }
         }
