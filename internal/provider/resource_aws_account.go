@@ -606,6 +606,8 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
     // Set up AWS clients
     cfg := meta.(aws.Config)
     scconn := servicecatalog.NewFromConfig(cfg)
+    ssoadminconn := ssoadmin.NewFromConfig(cfg)
+    identitystoreconn := identitystore.NewFromConfig(cfg)
 
     // Find the Control Tower Account Factory product
     productId, _, err := findServiceCatalogAccountProductId(ctx, scconn)
@@ -620,8 +622,11 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
         },
     })
 
+    var foundProduct bool
+    var userEmail string
+
     // Loop through pages of results
-    for searchPaginator.HasMorePages() {
+    for searchPaginator.HasMorePages() && !foundProduct {
         page, err := searchPaginator.NextPage(ctx)
         if err != nil {
             return nil, fmt.Errorf("error searching provisioned products: %w", err)
@@ -647,45 +652,139 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                 if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
                     // Found the matching account - set resource ID to provisioned product ID
                     d.SetId(*product.Id)
+                    foundProduct = true
 
-                    // Create SSO map with default values for required fields
-                    ssoMap := make(map[string]interface{})
-                    ssoMap["first_name"] = "ImportedUser"
-                    ssoMap["last_name"] = "DoNotChange"
-                    ssoMap["permission_set_name"] = "AWSAdministratorAccess"
-                    ssoMap["remove_account_assignment_on_update"] = false
-
-                    // Try to find email from record outputs
-                    for _, output := range record.RecordOutputs {
-                        if *output.OutputKey == "SSOUserEmail" {
-                            ssoMap["email"] = *output.OutputValue
+                    // Search for SSO email
+                    for _, o := range record.RecordOutputs {
+                        if *o.OutputKey == "SSOUserEmail" && o.OutputValue != nil {
+                            userEmail = *o.OutputValue
                             break
                         }
                     }
 
-                    // If email not found, try to use account email
-                    if _, ok := ssoMap["email"]; !ok {
-                        for _, output := range record.RecordOutputs {
-                            if *output.OutputKey == "AccountEmail" {
-                                ssoMap["email"] = *output.OutputValue
+                    // If SSO email not found, fallback to account email
+                    if userEmail == "" {
+                        for _, o := range record.RecordOutputs {
+                            if *o.OutputKey == "AccountEmail" && o.OutputValue != nil {
+                                userEmail = *o.OutputValue
                                 break
                             }
                         }
                     }
+                    break
+                }
+            }
 
-                    // Set SSO configuration in state
-                    if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
-                        return nil, fmt.Errorf("error setting SSO values: %w", err)
-                    }
+            if foundProduct {
+                break
+            }
+        }
+    }
 
-                    // Let the Read function handle the rest
-                    return schema.ImportStatePassthroughContext(ctx, d, meta)
+    if !foundProduct {
+        return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
+    }
+
+    // Create SSO map with default values that will be overridden if possible
+    ssoMap := map[string]interface{}{
+        "first_name":                       "ImportedUser",
+        "last_name":                        "DoNotChange",
+        "email":                            userEmail,
+        "permission_set_name":              "AWSAdministratorAccess",
+        "remove_account_assignment_on_update": false,
+    }
+
+    // Get SSO instance to retrieve actual user details and permission set
+    ssoInstances, err := ssoadminconn.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
+    if err != nil || len(ssoInstances.Instances) == 0 {
+        // If we can't get SSO instances, just use default values
+        if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
+            return nil, fmt.Errorf("error setting SSO values: %w", err)
+        }
+        return schema.ImportStatePassthroughContext(ctx, d, meta)
+    }
+
+    instanceArn := ssoInstances.Instances[0].InstanceArn
+    identityStoreId := ssoInstances.Instances[0].IdentityStoreId
+
+    // Try to find user by email
+    if userEmail != "" {
+        // Try username attribute first
+        alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
+            Value: types.UniqueAttribute{
+                AttributePath:  aws.String("UserName"),
+                AttributeValue: document.NewLazyDocument(userEmail),
+            },
+        }
+
+        getUserIdResp, err := identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
+            IdentityStoreId:     identityStoreId,
+            AlternateIdentifier: alternateIdentifier,
+        })
+
+        // If username lookup fails, try email attribute
+        if err != nil {
+            alternateIdentifier = &types.AlternateIdentifierMemberUniqueAttribute{
+                Value: types.UniqueAttribute{
+                    AttributePath:  aws.String("Emails.Value"),
+                    AttributeValue: document.NewLazyDocument(userEmail),
+                },
+            }
+
+            getUserIdResp, err = identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
+                IdentityStoreId:     identityStoreId,
+                AlternateIdentifier: alternateIdentifier,
+            })
+        }
+
+        // If we found the user, get their details
+        if err == nil && getUserIdResp.UserId != nil {
+            userId := getUserIdResp.UserId
+
+            // Get user details
+            userDetails, err := identitystoreconn.GetUser(ctx, &identitystore.GetUserInput{
+                IdentityStoreId: identityStoreId,
+                UserId:          userId,
+            })
+
+            if err == nil && userDetails.Name != nil {
+                if userDetails.Name.GivenName != nil {
+                    ssoMap["first_name"] = *userDetails.Name.GivenName
+                }
+                if userDetails.Name.FamilyName != nil {
+                    ssoMap["last_name"] = *userDetails.Name.FamilyName
+                }
+            }
+
+            // Get permission set assignment
+            assignments, err := ssoadminconn.ListAccountAssignments(ctx, &ssoadmin.ListAccountAssignmentsInput{
+                AccountId:     aws.String(accountID),
+                InstanceArn:   instanceArn,
+                PrincipalId:   userId,
+                PrincipalType: types.PrincipalTypeUser,
+            })
+
+            if err == nil && len(assignments.AccountAssignments) > 0 {
+                permissionSetArn := assignments.AccountAssignments[0].PermissionSetArn
+                permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+                    InstanceArn:      instanceArn,
+                    PermissionSetArn: permissionSetArn,
+                })
+
+                if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
+                    ssoMap["permission_set_name"] = *permSet.PermissionSet.Name
                 }
             }
         }
     }
 
-    return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
+    // Set SSO configuration in state
+    if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
+        return nil, fmt.Errorf("error setting SSO values: %w", err)
+    }
+
+    // Let the Read function handle the rest
+    return schema.ImportStatePassthroughContext(ctx, d, meta)
 }
 
 // waitForProvisioning waits until the provisioning finished.
