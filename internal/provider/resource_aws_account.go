@@ -737,17 +737,18 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
             })
         }
 
-        // If we found the user, get their details if possible
+        // If we found the user, get their details
         if err == nil && getUserIdResp.UserId != nil {
             userId := getUserIdResp.UserId
 
-            // ListUsers to find matching user instead of GetUser
+            // ListUsers with matching UserId
+            // Fix: Use string comparison filter instead of document
             listUsersInput := &identitystore.ListUsersInput{
                 IdentityStoreId: identityStoreId,
                 Filters: []types.Filter{
                     {
                         AttributePath:  aws.String("UserId"),
-                        AttributeValue: document.NewLazyDocument(*userId),
+                        AttributeValue: aws.String(*userId),
                     },
                 },
             }
@@ -766,11 +767,11 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                 }
             }
 
-            // Get permission set assignment - with correct field names
+            // Get permission set assignments
             listAssignmentsInput := &ssoadmin.ListAccountAssignmentsInput{
-                AccountId:      aws.String(accountID),
-                InstanceArn:    instanceArn,
-                MaxResults:     aws.Int32(10),
+                AccountId:   aws.String(accountID),
+                InstanceArn: instanceArn,
+                MaxResults:  aws.Int32(10),
             }
 
             // Loop through assignments to find the one for this user
@@ -782,6 +783,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                 }
 
                 for _, assignment := range page.AccountAssignments {
+                    // Compare userId as strings directly
                     if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
                         permissionSetArn := assignment.PermissionSetArn
 
