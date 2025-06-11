@@ -643,7 +643,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
             }
 
             // Look for account ID match in outputs
-            for _, output := range record.RecordDetail.RecordOutputs {
+            for _, output := range record.RecordOutputs {
                 if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
                     // Found the matching account - set resource ID to provisioned product ID
                     d.SetId(*product.Id)
