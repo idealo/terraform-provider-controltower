@@ -656,7 +656,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                     ssoMap["remove_account_assignment_on_update"] = false
 
                     // Try to find email from record outputs
-                    for _, output := range record.RecordDetail.RecordOutputs {
+                    for _, output := range record.RecordOutputs {
                         if *output.OutputKey == "SSOUserEmail" {
                             ssoMap["email"] = *output.OutputValue
                             break
@@ -665,7 +665,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
 
                     // If email not found, try to use account email
                     if _, ok := ssoMap["email"]; !ok {
-                        for _, output := range record.RecordDetail.RecordOutputs {
+                        for _, output := range record.RecordOutputs {
                             if *output.OutputKey == "AccountEmail" {
                                 ssoMap["email"] = *output.OutputValue
                                 break
