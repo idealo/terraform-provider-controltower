@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/identitystore"
 	"github.com/aws/aws-sdk-go-v2/service/identitystore/document"
@@ -616,30 +617,29 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
     }
 
     // Search for the provisioned product matching this account
-    searchPaginator := servicecatalog.NewSearchProvisionedProductsPaginator(scconn, &servicecatalog.SearchProvisionedProductsInput{
-        Filters: map[string][]string{
-            "ProductId": {*productId},
-        },
-    })
-
     var foundProduct bool
     var userEmail string
 
-    // Loop through pages of results
+    // Use paginator to search through all provisioned products
+    searchPaginator := servicecatalog.NewSearchProvisionedProductsPaginator(scconn,
+        &servicecatalog.SearchProvisionedProductsInput{
+            Filters: map[string][]string{
+                "SearchQuery": {"productId:" + *productId},
+            },
+        })
+
     for searchPaginator.HasMorePages() && !foundProduct {
         page, err := searchPaginator.NextPage(ctx)
         if err != nil {
             return nil, fmt.Errorf("error searching provisioned products: %w", err)
         }
 
-        // Check each provisioned product
+        // Check each provisioned product for matching account ID
         for _, product := range page.ProvisionedProducts {
-            // Skip products without successful provisioning
             if product.LastSuccessfulProvisioningRecordId == nil {
                 continue
             }
 
-            // Get record details
             record, err := scconn.DescribeRecord(ctx, &servicecatalog.DescribeRecordInput{
                 Id: product.LastSuccessfulProvisioningRecordId,
             })
@@ -647,14 +647,12 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                 continue
             }
 
-            // Look for account ID match in outputs
             for _, output := range record.RecordOutputs {
                 if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
-                    // Found the matching account - set resource ID to provisioned product ID
                     d.SetId(*product.Id)
                     foundProduct = true
 
-                    // Search for SSO email
+                    // Extract SSO email from outputs
                     for _, o := range record.RecordOutputs {
                         if *o.OutputKey == "SSOUserEmail" && o.OutputValue != nil {
                             userEmail = *o.OutputValue
@@ -662,7 +660,6 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
                         }
                     }
 
-                    // If SSO email not found, fallback to account email
                     if userEmail == "" {
                         for _, o := range record.RecordOutputs {
                             if *o.OutputKey == "AccountEmail" && o.OutputValue != nil {
@@ -685,123 +682,138 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
         return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
     }
 
-    // Create SSO map with default values
+    // Initialize sso map with email
     ssoMap := map[string]interface{}{
-        "first_name":                       "ImportedUser",
-        "last_name":                        "DoNotChange",
-        "email":                            userEmail,
-        "permission_set_name":              "AWSAdministratorAccess",
-        "remove_account_assignment_on_update": false,
+        "email": userEmail,
     }
 
-    // Get SSO instance to retrieve actual user details and permission set
+    // Get SSO instance details
     ssoInstances, err := ssoadminconn.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
     if err != nil || len(ssoInstances.Instances) == 0 {
-        // If we can't get SSO instances, just use default values
-        if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
-            return nil, fmt.Errorf("error setting SSO values: %w", err)
-        }
-        return schema.ImportStatePassthroughContext(ctx, d, meta)
+        return nil, fmt.Errorf("error retrieving SSO instances or no instances found: %w", err)
     }
 
     instanceArn := ssoInstances.Instances[0].InstanceArn
     identityStoreId := ssoInstances.Instances[0].IdentityStoreId
 
-    // Try to find user by email
+    // Find the user by email using various attribute paths
+    var user *types.User
+    var userId *string
+
     if userEmail != "" {
-        // Try username attribute first
-        alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
-            Value: types.UniqueAttribute{
-                AttributePath:  aws.String("UserName"),
-                AttributeValue: document.NewLazyDocument(userEmail),
-            },
-        }
+        attributePaths := []string{"UserName", "PrimaryEmail", "Emails.Value"}
 
-        getUserIdResp, err := identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
-            IdentityStoreId:     identityStoreId,
-            AlternateIdentifier: alternateIdentifier,
-        })
-
-        // If username lookup fails, try email attribute
-        if err != nil {
-            alternateIdentifier = &types.AlternateIdentifierMemberUniqueAttribute{
-                Value: types.UniqueAttribute{
-                    AttributePath:  aws.String("Emails.Value"),
-                    AttributeValue: document.NewLazyDocument(userEmail),
-                },
-            }
-
-            getUserIdResp, err = identitystoreconn.GetUserId(ctx, &identitystore.GetUserIdInput{
-                IdentityStoreId:     identityStoreId,
-                AlternateIdentifier: alternateIdentifier,
-            })
-        }
-
-        // If we found the user, get their details
-        if err == nil && getUserIdResp.UserId != nil {
-            userId := getUserIdResp.UserId
-
-            // ListUsers with matching UserId
-            // Fix: Use string comparison filter instead of document
-            listUsersInput := &identitystore.ListUsersInput{
+        for _, attrPath := range attributePaths {
+            listUsersOutput, err := identitystoreconn.ListUsers(ctx, &identitystore.ListUsersInput{
                 IdentityStoreId: identityStoreId,
                 Filters: []types.Filter{
                     {
-                        AttributePath:  aws.String("UserId"),
-                        AttributeValue: aws.String(*userId),
+                        AttributePath:  aws.String(attrPath),
+                        AttributeValue: aws.String(userEmail),
                     },
                 },
-            }
+            })
 
-            listUsersOutput, err := identitystoreconn.ListUsers(ctx, listUsersInput)
             if err == nil && len(listUsersOutput.Users) > 0 {
-                user := listUsersOutput.Users[0]
+                user = &listUsersOutput.Users[0]
+                userId = user.UserId
+                break
+            }
+        }
 
-                if user.Name != nil {
-                    if user.Name.GivenName != nil {
-                        ssoMap["first_name"] = *user.Name.GivenName
-                    }
-                    if user.Name.FamilyName != nil {
-                        ssoMap["last_name"] = *user.Name.FamilyName
-                    }
+        if user != nil {
+            // Extract user details
+            if user.Name != nil {
+                if user.Name.GivenName != nil {
+                    ssoMap["first_name"] = *user.Name.GivenName
+                }
+                if user.Name.FamilyName != nil {
+                    ssoMap["last_name"] = *user.Name.FamilyName
                 }
             }
 
-            // Get permission set assignments
-            listAssignmentsInput := &ssoadmin.ListAccountAssignmentsInput{
-                AccountId:   aws.String(accountID),
-                InstanceArn: instanceArn,
-                MaxResults:  aws.Int32(10),
+            // Get the default permission set name from schema without hard-coding
+            permissionSetSchema := resourceAWSAccount().Schema["sso"].Elem.(*schema.Resource).Schema["permission_set_name"]
+            defaultPermissionSetName := ""
+            if permissionSetSchema.Default != nil {
+                defaultPermissionSetName = permissionSetSchema.Default.(string)
             }
 
-            // Loop through assignments to find the one for this user
-            assignmentsPaginator := ssoadmin.NewListAccountAssignmentsPaginator(ssoadminconn, listAssignmentsInput)
-            for assignmentsPaginator.HasMorePages() {
-                page, err := assignmentsPaginator.NextPage(ctx)
-                if err != nil {
-                    break
-                }
+            if userId != nil {
+                // Get all permission sets
+                permissionSets, err := ssoadminconn.ListPermissionSets(ctx, &ssoadmin.ListPermissionSetsInput{
+                    InstanceArn: instanceArn,
+                })
+                if err == nil {
+                    foundPermissionSets := []string{}
 
-                for _, assignment := range page.AccountAssignments {
-                    // Compare userId as strings directly
-                    if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
-                        permissionSetArn := assignment.PermissionSetArn
-
-                        // Get permission set details
-                        permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+                    // For each permission set, check if user has an assignment
+                    for _, permissionSetArn := range permissionSets.PermissionSets {
+                        assignments, err := ssoadminconn.ListAccountAssignments(ctx, &ssoadmin.ListAccountAssignmentsInput{
+                            AccountId:        aws.String(accountID),
                             InstanceArn:      instanceArn,
-                            PermissionSetArn: permissionSetArn,
+                            PermissionSetArn: &permissionSetArn,
                         })
-
-                        if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
-                            ssoMap["permission_set_name"] = *permSet.PermissionSet.Name
+                        if err != nil {
+                            continue
                         }
 
-                        break
+                        for _, assignment := range assignments.AccountAssignments {
+                            if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
+                                // Get permission set name
+                                permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+                                    InstanceArn:      instanceArn,
+                                    PermissionSetArn: &permissionSetArn,
+                                })
+                                if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
+                                    permSetName := *permSet.PermissionSet.Name
+                                    foundPermissionSets = append(foundPermissionSets, permSetName)
+
+                                    // Prioritize matching the default permission set
+                                    if permSetName == defaultPermissionSetName {
+                                        ssoMap["permission_set_name"] = permSetName
+                                        break
+                                    }
+
+                                    // Otherwise use the first permission set found
+                                    if _, exists := ssoMap["permission_set_name"]; !exists {
+                                        ssoMap["permission_set_name"] = permSetName
+                                    }
+                                }
+                            }
+                        }
+
+                        // If we found the default permission set, stop searching
+                        if permSetName, exists := ssoMap["permission_set_name"]; exists &&
+                           permSetName.(string) == defaultPermissionSetName {
+                            break
+                        }
+                    }
+
+                    // Log for multiple permission sets without hard-coding values
+                    if len(foundPermissionSets) > 1 {
+                        selectedSet := ssoMap["permission_set_name"].(string)
+                        fmt.Printf("[INFO] User has %d permission sets assigned: %v. Selected: '%s'.\n",
+                            len(foundPermissionSets),
+                            strings.Join(foundPermissionSets, ", "),
+                            selectedSet)
                     }
                 }
             }
         }
+    }
+
+    // Verify we have all required fields
+    missingFields := []string{}
+    for _, field := range []string{"first_name", "last_name", "permission_set_name"} {
+        if _, exists := ssoMap[field]; !exists {
+            missingFields = append(missingFields, field)
+        }
+    }
+
+    if len(missingFields) > 0 {
+        return nil, fmt.Errorf("could not retrieve required SSO fields: %s for email: %s",
+            strings.Join(missingFields, ", "), userEmail)
     }
 
     // Set SSO configuration in state
@@ -812,6 +824,7 @@ func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, 
     // Let the Read function handle the rest
     return schema.ImportStatePassthroughContext(ctx, d, meta)
 }
+
 
 // waitForProvisioning waits until the provisioning finished.
 func waitForProvisioning(ctx context.Context, name string, recordID *string, client *servicecatalog.Client) (*servicecatalog.DescribeRecordOutput, diag.Diagnostics) {
