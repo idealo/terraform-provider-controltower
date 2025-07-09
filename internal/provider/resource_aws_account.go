@@ -38,9 +38,9 @@ func resourceAWSAccount() *schema.Resource {
 		ReadContext:   resourceAWSAccountRead,
 		UpdateContext: resourceAWSAccountUpdate,
 		DeleteContext: resourceAWSAccountDelete,
-	    Importer: &schema.ResourceImporter{
-          StateContext: resourceAWSAccountImportState,
-        },
+		Importer: &schema.ResourceImporter{
+			StateContext: resourceAWSAccountImportState,
+		},
 
 		Schema: map[string]*schema.Schema{
 			"name": {
@@ -601,230 +601,220 @@ func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m int
 }
 
 func resourceAWSAccountImportState(ctx context.Context, d *schema.ResourceData, meta interface{}) ([]*schema.ResourceData, error) {
-    // Get account ID from import command
-    accountID := d.Id()
+	// Get account ID from import command
+	accountID := d.Id()
 
-    // Set up AWS clients
-    cfg := meta.(aws.Config)
-    scconn := servicecatalog.NewFromConfig(cfg)
-    ssoadminconn := ssoadmin.NewFromConfig(cfg)
-    identitystoreconn := identitystore.NewFromConfig(cfg)
+	// Set up AWS clients
+	cfg := meta.(aws.Config)
+	scconn := servicecatalog.NewFromConfig(cfg)
+	ssoadminconn := ssoadmin.NewFromConfig(cfg)
+	identitystoreconn := identitystore.NewFromConfig(cfg)
 
-    // Find the Control Tower Account Factory product
-    productId, _, err := findServiceCatalogAccountProductId(ctx, scconn)
-    if err != nil {
-        return nil, fmt.Errorf("error finding Control Tower Account Factory product: %w", err)
-    }
+	// Find the Control Tower Account Factory product
+	productId, _, err := findServiceCatalogAccountProductId(ctx, scconn)
+	if err != nil {
+		return nil, fmt.Errorf("error finding Control Tower Account Factory product: %w", err)
+	}
 
-    // Search for the provisioned product matching this account
-    var foundProduct bool
-    var userEmail string
+	// Search for the provisioned product matching this account
+	var foundProduct bool
+	var userEmail string
 
-    // Use paginator to search through all provisioned products
-    searchPaginator := servicecatalog.NewSearchProvisionedProductsPaginator(scconn,
-        &servicecatalog.SearchProvisionedProductsInput{
-            Filters: map[string][]string{
-                "SearchQuery": {"productId:" + *productId},
-            },
-        })
+	// Use paginator to search through all provisioned products
+	searchPaginator := servicecatalog.NewSearchProvisionedProductsPaginator(scconn,
+		&servicecatalog.SearchProvisionedProductsInput{
+			Filters: map[string][]string{
+				"SearchQuery": {"productId:" + *productId},
+			},
+		})
 
-    for searchPaginator.HasMorePages() && !foundProduct {
-        page, err := searchPaginator.NextPage(ctx)
-        if err != nil {
-            return nil, fmt.Errorf("error searching provisioned products: %w", err)
-        }
+	for searchPaginator.HasMorePages() && !foundProduct {
+		page, err := searchPaginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error searching provisioned products: %w", err)
+		}
 
-        // Check each provisioned product for matching account ID
-        for _, product := range page.ProvisionedProducts {
-            if product.LastSuccessfulProvisioningRecordId == nil {
-                continue
-            }
+		// Check each provisioned product for matching account ID
+		for _, product := range page.ProvisionedProducts {
+			if product.LastSuccessfulProvisioningRecordId == nil {
+				continue
+			}
 
-            record, err := scconn.DescribeRecord(ctx, &servicecatalog.DescribeRecordInput{
-                Id: product.LastSuccessfulProvisioningRecordId,
-            })
-            if err != nil {
-                continue
-            }
+			record, err := scconn.DescribeRecord(ctx, &servicecatalog.DescribeRecordInput{
+				Id: product.LastSuccessfulProvisioningRecordId,
+			})
+			if err != nil {
+				continue
+			}
 
-            for _, output := range record.RecordOutputs {
-                if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
-                    d.SetId(*product.Id)
-                    foundProduct = true
+			for _, output := range record.RecordOutputs {
+				if *output.OutputKey == "AccountId" && *output.OutputValue == accountID {
+					d.SetId(*product.Id)
+					foundProduct = true
 
-                    // Extract SSO email from outputs
-                    for _, o := range record.RecordOutputs {
-                        if *o.OutputKey == "SSOUserEmail" && o.OutputValue != nil {
-                            userEmail = *o.OutputValue
-                            break
-                        }
-                    }
+					// Extract SSO email from outputs
+					for _, o := range record.RecordOutputs {
+						if *o.OutputKey == "SSOUserEmail" && o.OutputValue != nil {
+							userEmail = *o.OutputValue
+							break
+						}
+					}
+					break
+				}
+			}
 
-                    if userEmail == "" {
-                        for _, o := range record.RecordOutputs {
-                            if *o.OutputKey == "AccountEmail" && o.OutputValue != nil {
-                                userEmail = *o.OutputValue
-                                break
-                            }
-                        }
-                    }
-                    break
-                }
-            }
+			if foundProduct {
+				break
+			}
+		}
+	}
 
-            if foundProduct {
-                break
-            }
-        }
-    }
+	if !foundProduct {
+		return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
+	}
 
-    if !foundProduct {
-        return nil, fmt.Errorf("could not find provisioned product for AWS account: %s", accountID)
-    }
+	// Initialize sso map with email
+	ssoMap := map[string]interface{}{
+		"email": userEmail,
+	}
 
-    // Initialize sso map with email
-    ssoMap := map[string]interface{}{
-        "email": userEmail,
-    }
+	// Get SSO instance details
+	ssoInstances, err := ssoadminconn.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
+	if err != nil || len(ssoInstances.Instances) == 0 {
+		return nil, fmt.Errorf("error retrieving SSO instances or no instances found: %w", err)
+	}
 
-    // Get SSO instance details
-    ssoInstances, err := ssoadminconn.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
-    if err != nil || len(ssoInstances.Instances) == 0 {
-        return nil, fmt.Errorf("error retrieving SSO instances or no instances found: %w", err)
-    }
+	instanceArn := ssoInstances.Instances[0].InstanceArn
+	identityStoreId := ssoInstances.Instances[0].IdentityStoreId
 
-    instanceArn := ssoInstances.Instances[0].InstanceArn
-    identityStoreId := ssoInstances.Instances[0].IdentityStoreId
+	// Find the user by email using various attribute paths
+	var user *types.User
+	var userId *string
 
-    // Find the user by email using various attribute paths
-    var user *types.User
-    var userId *string
+	if userEmail != "" {
+		attributePaths := []string{"UserName", "PrimaryEmail", "Emails.Value"}
 
-    if userEmail != "" {
-        attributePaths := []string{"UserName", "PrimaryEmail", "Emails.Value"}
+		for _, attrPath := range attributePaths {
+			listUsersOutput, err := identitystoreconn.ListUsers(ctx, &identitystore.ListUsersInput{
+				IdentityStoreId: identityStoreId,
+				Filters: []types.Filter{
+					{
+						AttributePath:  aws.String(attrPath),
+						AttributeValue: aws.String(userEmail),
+					},
+				},
+			})
 
-        for _, attrPath := range attributePaths {
-            listUsersOutput, err := identitystoreconn.ListUsers(ctx, &identitystore.ListUsersInput{
-                IdentityStoreId: identityStoreId,
-                Filters: []types.Filter{
-                    {
-                        AttributePath:  aws.String(attrPath),
-                        AttributeValue: aws.String(userEmail),
-                    },
-                },
-            })
+			if err == nil && len(listUsersOutput.Users) > 0 {
+				user = &listUsersOutput.Users[0]
+				userId = user.UserId
+				break
+			}
+		}
 
-            if err == nil && len(listUsersOutput.Users) > 0 {
-                user = &listUsersOutput.Users[0]
-                userId = user.UserId
-                break
-            }
-        }
+		if user != nil {
+			// Extract user details
+			if user.Name != nil {
+				if user.Name.GivenName != nil {
+					ssoMap["first_name"] = *user.Name.GivenName
+				}
+				if user.Name.FamilyName != nil {
+					ssoMap["last_name"] = *user.Name.FamilyName
+				}
+			}
 
-        if user != nil {
-            // Extract user details
-            if user.Name != nil {
-                if user.Name.GivenName != nil {
-                    ssoMap["first_name"] = *user.Name.GivenName
-                }
-                if user.Name.FamilyName != nil {
-                    ssoMap["last_name"] = *user.Name.FamilyName
-                }
-            }
+			// Get the default permission set name from schema without hard-coding
+			permissionSetSchema := resourceAWSAccount().Schema["sso"].Elem.(*schema.Resource).Schema["permission_set_name"]
+			defaultPermissionSetName := ""
+			if permissionSetSchema.Default != nil {
+				defaultPermissionSetName = permissionSetSchema.Default.(string)
+			}
 
-            // Get the default permission set name from schema without hard-coding
-            permissionSetSchema := resourceAWSAccount().Schema["sso"].Elem.(*schema.Resource).Schema["permission_set_name"]
-            defaultPermissionSetName := ""
-            if permissionSetSchema.Default != nil {
-                defaultPermissionSetName = permissionSetSchema.Default.(string)
-            }
+			if userId != nil {
+				// Get all permission sets
+				permissionSets, err := ssoadminconn.ListPermissionSets(ctx, &ssoadmin.ListPermissionSetsInput{
+					InstanceArn: instanceArn,
+				})
+				if err == nil {
+					foundPermissionSets := []string{}
 
-            if userId != nil {
-                // Get all permission sets
-                permissionSets, err := ssoadminconn.ListPermissionSets(ctx, &ssoadmin.ListPermissionSetsInput{
-                    InstanceArn: instanceArn,
-                })
-                if err == nil {
-                    foundPermissionSets := []string{}
+					// For each permission set, check if user has an assignment
+					for _, permissionSetArn := range permissionSets.PermissionSets {
+						assignments, err := ssoadminconn.ListAccountAssignments(ctx, &ssoadmin.ListAccountAssignmentsInput{
+							AccountId:        aws.String(accountID),
+							InstanceArn:      instanceArn,
+							PermissionSetArn: &permissionSetArn,
+						})
+						if err != nil {
+							continue
+						}
 
-                    // For each permission set, check if user has an assignment
-                    for _, permissionSetArn := range permissionSets.PermissionSets {
-                        assignments, err := ssoadminconn.ListAccountAssignments(ctx, &ssoadmin.ListAccountAssignmentsInput{
-                            AccountId:        aws.String(accountID),
-                            InstanceArn:      instanceArn,
-                            PermissionSetArn: &permissionSetArn,
-                        })
-                        if err != nil {
-                            continue
-                        }
+						for _, assignment := range assignments.AccountAssignments {
+							if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
+								// Get permission set name
+								permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
+									InstanceArn:      instanceArn,
+									PermissionSetArn: &permissionSetArn,
+								})
+								if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
+									permSetName := *permSet.PermissionSet.Name
+									foundPermissionSets = append(foundPermissionSets, permSetName)
 
-                        for _, assignment := range assignments.AccountAssignments {
-                            if assignment.PrincipalType == "USER" && *assignment.PrincipalId == *userId {
-                                // Get permission set name
-                                permSet, err := ssoadminconn.DescribePermissionSet(ctx, &ssoadmin.DescribePermissionSetInput{
-                                    InstanceArn:      instanceArn,
-                                    PermissionSetArn: &permissionSetArn,
-                                })
-                                if err == nil && permSet.PermissionSet != nil && permSet.PermissionSet.Name != nil {
-                                    permSetName := *permSet.PermissionSet.Name
-                                    foundPermissionSets = append(foundPermissionSets, permSetName)
+									// Prioritize matching the default permission set
+									if permSetName == defaultPermissionSetName {
+										ssoMap["permission_set_name"] = permSetName
+										break
+									}
 
-                                    // Prioritize matching the default permission set
-                                    if permSetName == defaultPermissionSetName {
-                                        ssoMap["permission_set_name"] = permSetName
-                                        break
-                                    }
+									// Otherwise use the first permission set found
+									if _, exists := ssoMap["permission_set_name"]; !exists {
+										ssoMap["permission_set_name"] = permSetName
+									}
+								}
+							}
+						}
 
-                                    // Otherwise use the first permission set found
-                                    if _, exists := ssoMap["permission_set_name"]; !exists {
-                                        ssoMap["permission_set_name"] = permSetName
-                                    }
-                                }
-                            }
-                        }
+						// If we found the default permission set, stop searching
+						if permSetName, exists := ssoMap["permission_set_name"]; exists &&
+							permSetName.(string) == defaultPermissionSetName {
+							break
+						}
+					}
 
-                        // If we found the default permission set, stop searching
-                        if permSetName, exists := ssoMap["permission_set_name"]; exists &&
-                           permSetName.(string) == defaultPermissionSetName {
-                            break
-                        }
-                    }
+					// Log for multiple permission sets without hard-coding values
+					if len(foundPermissionSets) > 1 {
+						selectedSet := ssoMap["permission_set_name"].(string)
+						fmt.Printf("[INFO] User has %d permission sets assigned: %v. Selected: '%s'.\n",
+							len(foundPermissionSets),
+							strings.Join(foundPermissionSets, ", "),
+							selectedSet)
+					}
+				}
+			}
+		}
+	}
 
-                    // Log for multiple permission sets without hard-coding values
-                    if len(foundPermissionSets) > 1 {
-                        selectedSet := ssoMap["permission_set_name"].(string)
-                        fmt.Printf("[INFO] User has %d permission sets assigned: %v. Selected: '%s'.\n",
-                            len(foundPermissionSets),
-                            strings.Join(foundPermissionSets, ", "),
-                            selectedSet)
-                    }
-                }
-            }
-        }
-    }
+	// Verify we have all required fields
+	missingFields := []string{}
+	for _, field := range []string{"first_name", "last_name", "permission_set_name"} {
+		if _, exists := ssoMap[field]; !exists {
+			missingFields = append(missingFields, field)
+		}
+	}
 
-    // Verify we have all required fields
-    missingFields := []string{}
-    for _, field := range []string{"first_name", "last_name", "permission_set_name"} {
-        if _, exists := ssoMap[field]; !exists {
-            missingFields = append(missingFields, field)
-        }
-    }
+	if len(missingFields) > 0 {
+		return nil, fmt.Errorf("could not retrieve required SSO fields: %s for email: %s",
+			strings.Join(missingFields, ", "), userEmail)
+	}
 
-    if len(missingFields) > 0 {
-        return nil, fmt.Errorf("could not retrieve required SSO fields: %s for email: %s",
-            strings.Join(missingFields, ", "), userEmail)
-    }
+	// Set SSO configuration in state
+	if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
+		return nil, fmt.Errorf("error setting SSO values: %w", err)
+	}
 
-    // Set SSO configuration in state
-    if err := d.Set("sso", []interface{}{ssoMap}); err != nil {
-        return nil, fmt.Errorf("error setting SSO values: %w", err)
-    }
-
-    // Let the Read function handle the rest
-    return schema.ImportStatePassthroughContext(ctx, d, meta)
+	// Let the Read function handle the rest
+	return schema.ImportStatePassthroughContext(ctx, d, meta)
 }
-
 
 // waitForProvisioning waits until the provisioning finished.
 func waitForProvisioning(ctx context.Context, name string, recordID *string, client *servicecatalog.Client) (*servicecatalog.DescribeRecordOutput, diag.Diagnostics) {
