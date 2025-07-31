@@ -154,6 +154,10 @@ func resourceAWSAccount() *schema.Resource {
 var accountMutex sync.Mutex
 
 func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	// Create context with configured timeout
+	timeout := d.Timeout(schema.TimeoutCreate)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	cfg := m.(aws.Config)
 
@@ -249,6 +253,11 @@ func resourceAWSAccountCreate(ctx context.Context, d *schema.ResourceData, m int
 }
 
 func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	// Create context with configured timeout
+	timeout := d.Timeout(schema.TimeoutRead)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	cfg := m.(aws.Config)
 
 	scconn := servicecatalog.NewFromConfig(cfg)
@@ -357,6 +366,11 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 }
 
 func resourceAWSAccountUpdate(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	// Create context with configured timeout
+	timeout := d.Timeout(schema.TimeoutUpdate)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	cfg := m.(aws.Config)
 
 	scconn := servicecatalog.NewFromConfig(cfg)
@@ -466,7 +480,7 @@ func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client,
 		return fmt.Errorf("error listing SSO instances: %v", err)
 	}
 	instanceArn := ssoInstances.Instances[0].InstanceArn
-	principalUserId, err := findPrincipalUserId(ctx, ssoInstances, oldEmail, err, identitystoreconn)
+	principalUserId, err := findPrincipalUserId(ctx, ssoInstances, oldEmail, identitystoreconn)
 	if err != nil {
 		return err
 	}
@@ -493,7 +507,7 @@ func updateAccountAssignment(ctx context.Context, ssoadminconn *ssoadmin.Client,
 	return nil
 }
 
-func findPrincipalUserId(ctx context.Context, ssoInstances *ssoadmin.ListInstancesOutput, oldEmail string, err error, identitystoreconn *identitystore.Client) (*string, error) {
+func findPrincipalUserId(ctx context.Context, ssoInstances *ssoadmin.ListInstancesOutput, oldEmail string, identitystoreconn *identitystore.Client) (*string, error) {
 	identityStoreId := ssoInstances.Instances[0].IdentityStoreId
 
 	alternateIdentifier := &types.AlternateIdentifierMemberUniqueAttribute{
@@ -537,6 +551,11 @@ func findPermissionSetArn(ctx context.Context, ssoadminconn *ssoadmin.Client, in
 	return "", fmt.Errorf("permission set not found")
 }
 func resourceAWSAccountDelete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	// Create context with configured timeout
+	timeout := d.Timeout(schema.TimeoutDelete)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	cfg := m.(aws.Config)
 
 	scconn := servicecatalog.NewFromConfig(cfg)
@@ -611,6 +630,13 @@ func waitForProvisioning(ctx context.Context, name string, recordID *string, cli
 	}
 
 	for {
+		// Check if context has been cancelled (timeout reached)
+		select {
+		case <-ctx.Done():
+			return status, diag.Errorf("timeout reached while waiting for account %s provisioning: %v", name, ctx.Err())
+		default:
+		}
+
 		// Get the provisioning status.
 		var err error
 		status, err = client.DescribeRecord(ctx, record)
@@ -631,8 +657,15 @@ func waitForProvisioning(ctx context.Context, name string, recordID *string, cli
 			return status, diag.Errorf("provisioning account %s failed with unknown error", name)
 		}
 
-		// Wait 5 seconds before checking the status again.
-		time.Sleep(5 * time.Second)
+		// Wait 5 seconds before checking the status again, but respect context cancellation
+		timer := time.NewTimer(5 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return status, diag.Errorf("timeout reached while waiting for account %s provisioning: %v", name, ctx.Err())
+		case <-timer.C:
+			// Continue the loop
+		}
 	}
 
 	return status, diags
