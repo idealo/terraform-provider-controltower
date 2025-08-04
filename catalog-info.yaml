@@ -5,7 +5,7 @@ metadata:
   description: Use AWS Control Tower from Terraform
   annotations:
     github.com/project-slug: idealo/terraform-provider-controltower
-    github.com/team-slug: idealo/engineering-experience
+    github.com/team-slug: idealo/cloud-core
   tags:
     - terraform-provider
     - aws
