@@ -16,5 +16,5 @@ metadata:
 spec:
   type: service
   lifecycle: production
-  owner: group:engineering-experience
+  owner: group:cloud-core
   system: organization
