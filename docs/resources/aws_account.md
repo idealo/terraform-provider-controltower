@@ -19,11 +19,32 @@ resource "controltower_aws_account" "account" {
   organizational_unit = "Sandbox"
 
   organizational_unit_id_on_delete = "ou-some-id"
+  close_account_on_delete          = true
 
   sso {
-    first_name = "John"
-    last_name  = "Doe"
-    email      = "john.doe@example.com"
+    first_name                          = "John"
+    last_name                           = "Doe"
+    email                               = "john.doe@example.com"
+    remove_account_assignment_on_update = true
+  }
+
+  tags = {
+    "team-name"    = "platform"
+    "cost-center"  = "engineering"
+    "department"   = "technology"
+  }
+
+  timeouts {
+    read   = "45m"
+    create = "45m"
+    update = "45m"
+    delete = "45m"
+  }
+
+  lifecycle {
+    ignore_changes = [
+      tags["account-id"]
+    ]
   }
 }
 ```
@@ -70,7 +91,35 @@ Optional:
 
 [Configuration options](https://developer.hashicorp.com/terraform/language/resources/syntax#operation-timeouts):
 
-- `read`   - (Default `20m`)
-- `create` - (Default `20m`)
-- `update` - (Default `20m`)
-- `delete` - (Default `20m`)
+- `create` - (Default `20m`) - Used for account creation through Control Tower Account Factory. Account provisioning can take 15-30 minutes depending on AWS workload.
+- `read`   - (Default `20m`) - Used for reading account status and configuration from AWS Organizations and Service Catalog.
+- `update` - (Default `20m`) - Used for updating account settings, SSO assignments, and organizational unit placement.
+- `delete` - (Default `20m`) - Used for account deletion/termination. This includes terminating the Service Catalog product and optionally moving/closing the account.
+
+### Configuring Timeout Values
+
+Configure timeouts directly in the resource block to handle long-running operations:
+
+```terraform
+resource "controltower_aws_account" "account" {
+  # ... other configuration ...
+
+  timeouts {
+    read   = "45m"
+    create = "45m"
+    update = "45m"
+    delete = "45m"
+  }
+}
+```
+
+### Recommended Timeout Values
+
+For production use cases, consider using longer timeout values than the defaults:
+
+- `create = "45m"` - Account creation through Control Tower can take 30-45 minutes
+- `update = "45m"` - SSO updates and organizational unit changes may require additional time
+- `delete = "45m"` - Account termination and cleanup can be slow, especially with account closure
+- `read = "45m"`   - Consistent timeout across all operations for predictable behavior
+
+**Note**: Account deletion operations may require additional time if `close_account_on_delete` is enabled, as AWS account closure involves additional validation steps.
