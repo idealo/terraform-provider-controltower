@@ -12,7 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.49.0
 	github.com/aws/aws-sdk-go-v2/service/servicecatalog v1.39.5
 	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.36.10
-	github.com/aws/smithy-go v1.23.2
+	github.com/aws/smithy-go v1.24.0
 	github.com/hashicorp/terraform-plugin-docs v0.24.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.38.1
 )
