@@ -10,19 +10,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name : test
+      - name: List Snyk orgs
+        uses: snyk/actions/golang@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run : |
-          snyk auth
-          snyk org list
+        with:
+          args: org list
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/golang@master
         continue-on-error: true # To make sure that SARIF upload gets called
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --sarif-file-output=snyk.sarif --org=idealo
+          args: >-
+            test
+            --org=idealo
+          #--sarif-file-output=snyk.sarif --org=idealo
       - name: Upload result to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v4
         with:
