@@ -345,11 +345,53 @@ func resourceAWSAccountRead(ctx context.Context, d *schema.ResourceData, m inter
 		return diag.FromErr(err)
 	}
 
-	ou, err := findParentOrganizationalUnit(ctx, organizationsconn, accountId)
+	// Find the OU that the account belongs to
+	accountParents, err := organizationsconn.ListParents(ctx, &organizations.ListParentsInput{
+		ChildId: aws.String(accountId),
+	})
+	if err != nil {
+		return diag.Errorf("error listing parents for account %s: %v", accountId, err)
+	}
+	if len(accountParents.Parents) == 0 {
+		return diag.Errorf("no parent found for account %s", accountId)
+	}
+
+	// Get the OU details
+	var ou *orgTypes.OrganizationalUnit
+	accountParent := accountParents.Parents[0]
+	if accountParent.Type == orgTypes.ParentTypeOrganizationalUnit {
+		ouOutput, err := organizationsconn.DescribeOrganizationalUnit(ctx, &organizations.DescribeOrganizationalUnitInput{
+			OrganizationalUnitId: accountParent.Id,
+		})
+		if err != nil {
+			return diag.Errorf("error describing organizational unit %s: %v", *accountParent.Id, err)
+		}
+		ou = ouOutput.OrganizationalUnit
+	} else {
+		return diag.Errorf("account %s parent is not an organizational unit", accountId)
+	}
+
+	// Check if the OU is nested (has an OU parent instead of a root parent)
+	ouParentId, err := findParentOrganizationalUnitId(ctx, organizationsconn, *ou.Id)
 	if err != nil {
 		return diag.FromErr(err)
 	}
-	if err := d.Set("organizational_unit", *ou.Name); err != nil {
+
+	// Determine the parent type of the OU's parent
+	parentType, err := findParentType(ctx, organizationsconn, ouParentId)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+
+	// If the OU's parent is another OU (not a root), format as "NAME (ID)" for nested OUs
+	var ouValue string
+	if parentType == orgTypes.ParentTypeOrganizationalUnit {
+		ouValue = fmt.Sprintf("%s (%s)", *ou.Name, *ou.Id)
+	} else {
+		ouValue = *ou.Name
+	}
+
+	if err := d.Set("organizational_unit", ouValue); err != nil {
 		return diag.FromErr(err)
 	}
 
@@ -922,6 +964,44 @@ func findServiceCatalogAccountProductId(ctx context.Context, client *servicecata
 
 	return productId, artifactID, nil
 }
+func findParentOrganizationalUnitId(ctx context.Context, client *organizations.Client, identifier string) (string, error) {
+	paginator := organizations.NewListParentsPaginator(client, &organizations.ListParentsInput{
+		ChildId: aws.String(identifier),
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return "", fmt.Errorf("error reading parents for %s: %w", identifier, err)
+		}
+
+		for _, parent := range output.Parents {
+			return *parent.Id, nil
+		}
+	}
+
+	return "", fmt.Errorf("no parent found for %s", identifier)
+}
+
+func findParentType(ctx context.Context, client *organizations.Client, parentId string) (orgTypes.ParentType, error) {
+	paginator := organizations.NewListParentsPaginator(client, &organizations.ListParentsInput{
+		ChildId: aws.String(parentId),
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return "", fmt.Errorf("error reading parents for %s: %w", parentId, err)
+		}
+
+		for _, parent := range output.Parents {
+			return parent.Type, nil
+		}
+	}
+
+	return "", fmt.Errorf("no parent found for %s", parentId)
+}
+
 func findParentOrganizationalUnit(ctx context.Context, client *organizations.Client, identifier string) (*orgTypes.OrganizationalUnit, error) {
 	paginator := organizations.NewListParentsPaginator(client, &organizations.ListParentsInput{
 		ChildId: aws.String(identifier),
