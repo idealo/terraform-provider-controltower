@@ -2,17 +2,17 @@ module github.com/idealo/terraform-provider-controltower
 
 go 1.25.8
 
-toolchain go1.26.5
+toolchain go1.27.0
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.43.3
-	github.com/aws/aws-sdk-go-v2/config v1.32.34
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.33
-	github.com/aws/aws-sdk-go-v2/service/identitystore v1.39.3
-	github.com/aws/aws-sdk-go-v2/service/organizations v1.53.3
-	github.com/aws/aws-sdk-go-v2/service/servicecatalog v1.42.3
-	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.42.3
-	github.com/aws/smithy-go v1.27.6
+	github.com/aws/aws-sdk-go-v2 v1.45.1
+	github.com/aws/aws-sdk-go-v2/config v1.33.2
+	github.com/aws/aws-sdk-go-v2/credentials v1.20.2
+	github.com/aws/aws-sdk-go-v2/service/identitystore v1.42.0
+	github.com/aws/aws-sdk-go-v2/service/organizations v1.58.0
+	github.com/aws/aws-sdk-go-v2/service/servicecatalog v1.45.0
+	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.46.0
+	github.com/aws/smithy-go v1.28.1
 	github.com/hashicorp/terraform-plugin-docs v0.25.0
 	github.com/hashicorp/terraform-plugin-sdk/v2 v2.40.1
 )
@@ -27,16 +27,16 @@ require (
 	github.com/agext/levenshtein v1.2.2 // indirect
 	github.com/apparentlymart/go-textseg/v15 v15.0.0 // indirect
 	github.com/armon/go-radix v1.0.0 // indirect
-	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.34 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.35 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.15 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.34 // indirect
-	github.com/aws/aws-sdk-go-v2/service/signin v1.5.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sso v1.33.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.38.3 // indirect
-	github.com/aws/aws-sdk-go-v2/service/sts v1.45.3 // indirect
+	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.19.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.8.1 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.5.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.19 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.1 // indirect
+	github.com/aws/aws-sdk-go-v2/service/signin v1.8.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sso v1.36.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.41.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/sts v1.48.0 // indirect
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
